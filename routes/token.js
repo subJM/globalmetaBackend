@@ -4,16 +4,61 @@ var router = express.Router();
 const {Web3} = require('web3');
 const fs = require('fs');
 const path = require('path');
-const {findTokenContractAddress , insertDB} = require('../mysql');
+const {findTokenContractAddress , insertDB ,getTokenList, checkAddress , updateWalletInfo} = require('../mysql');
 const { threadId } = require('worker_threads');
 const { throws } = require('assert');
 
 const axios = require('axios');
+require('dotenv').config();
 
 /* GET home page. */
 router.get('/', function(req, res, next) {
   res.render('index', { title: 'Express' });
 });
+
+router.post('/test2', function(req, res, next) {
+  console.log("test2 체크" ,req.body);
+  
+  const sign = 'plus';
+  const user_srl = req.body.user_srl;
+  const token_name = req.body.token_name;
+  const amount = 100;
+  historyData = {
+    token_name: 'BOB',
+    user_id: 'thswhdals',
+    from_address: '0x687087daFd0F7849e0Fe0992f474c5790e483B9d',
+    to_address: '0x9EA65955f379c7D1aaf166E18a118847Bd7Ff2A3',
+    amount: 100,
+    usedFee: '0.000036776997903711',
+    IsExternalTrade: 'no',
+    transactionHash: '0xf32c0a3e812857cf93f2d361036135c27abf42f158ba96e13568715ce384069d'
+  }
+  insertDB('bob_history', historyData, (error, result)=>{
+    if(error){
+      throw error;
+    }else{
+      const sign = 'minus';
+      const user_srl = req.body.user_srl;
+      const token_name = req.body.token_name;
+      const totalAmount = req.body.amount + finalCostEther;
+      updateWalletInfo( sign, user_srl, token_name, amount, (result) => {
+        console.log(result);
+      });
+
+      res.status(200).send(JSON.stringify({
+        result: 'success',
+        receipt: receipt,
+      }, (key, value) => 
+      // BigInt 값을 문자열로 변환
+        typeof value === 'bigint' ? value.toString() : value 
+      ));
+    }
+  });
+  updateWalletInfo( sign, user_srl, token_name, amount, (result) => {
+    console.log(result);
+  });
+});
+
 
 router.post('/test', async function(req, res, next){
   const web3 = new Web3(new Web3.providers.HttpProvider(process.env.ALCHEMY_TESTNET_RPC_URL));
@@ -69,6 +114,23 @@ router.post('/test', async function(req, res, next){
   });
 });
 
+router.post('/getTokenList', function(req, res, next) {
+  try {
+    const user_srl = req.body.user_srl;
+
+    getTokenList(user_srl ,async (error, results) => {
+      if(error){
+        throw error;
+      }
+      console.log('getHaveCoin : ',results);
+      res.status(200).send({ result: 'success', data: results});
+    });
+    
+  } catch (error) {
+    res.status(404).send({ result: 'error', msg: error});
+  }
+
+})
 
 router.post('/api/etherscan/history', function(req, res, next){
 
@@ -89,15 +151,22 @@ router.post('/api/etherscan/history', function(req, res, next){
 
 //잔고 가져오기
 router.post('/getBalance', async function(req, res, next) {
-  const token_name= req.body.token_name;
-  const user_address = req.body.user_address;
-
-  await getTokenBalance(token_name, user_address, (results) => {
-    console.log('callback: ', results);
-    res.status(200).send({
-      results
-    })
-  });
+  try {
+    const token_name= req.body.token_name;
+    const user_address = req.body.address;
+    await getTokenBalance(token_name, user_address, (results) => {
+      if(results =="" || results == undefined || results == null) {
+        res.status(200).send(
+          {result: "success", balance: 0}
+        )
+      }
+      res.status(200).send(
+        {result: "success", balance: results}
+      )
+    });
+  } catch (error) {
+    res.status(500).send({result: "error", error: error})
+  }
 });
 
 
@@ -109,6 +178,7 @@ router.post('/sendETH/',async(req, res, next) => {
     const web3 = new Web3(process.env.ALCHEMY_TESTNET_RPC_URL);
     //개인키관리
 
+    const user_srl = req.body.user_srl;
     const user_id = req.body.user_id
     const keyPath = path.join(__dirname, '..',`user`,`${user_id}`,`privateKey`);
     const senderPrivateKey =fs.readFileSync(keyPath, 'utf8');
@@ -144,6 +214,7 @@ router.post('/sendETH/',async(req, res, next) => {
 
     const historyData = {
       token_name: token_name,
+      user_srl: user_srl,
       user_id: user_id,
       from : senderAddress,
       to : receiverAddress,
@@ -153,7 +224,7 @@ router.post('/sendETH/',async(req, res, next) => {
     };
     // console.log('historyData :', historyData);
 
-    await insertDB('history', historyData, (error, result)=>{
+    await insertDB(token_name+'_history', historyData, (error, result)=>{
       if(error){
         throw error;
       }else{
@@ -180,13 +251,15 @@ router.post('/sendToken', async (req, res) => {
   try {
     const web3 = new Web3(process.env.ALCHEMY_TESTNET_RPC_URL);
 
+    const user_srl = req.body.user_srl;
     const user_id = req.body.user_id;
     const senderAddress = req.body.from_address;
     const receiverAddress = req.body.to_address;
     const token_name = req.body.token_name;
     const amount = web3.utils.toWei(req.body.amount, 'ether'); // 100 토큰
-  console.log('data' ,req.body);
-  console.log('amount Big Int : ' ,amount);
+    const IsExternalTrade = await checkInternal(token_name , receiverAddress);
+    console.log("IsExternalTrade: " , IsExternalTrade);
+
     //토큰 ABI 가져오기 
     const artifactPath = path.join(__dirname, '..','artifacts', 'contracts', `${token_name}.sol`, `${token_name}.json`);
     const ERC20_ABI = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
@@ -235,19 +308,29 @@ router.post('/sendToken', async (req, res) => {
 
         const historyData = {
           token_name: token_name,
+          user_srl: user_srl,
           user_id: user_id,
-          from : senderAddress,
-          to : receiverAddress,
+          from_address : senderAddress,
+          to_address : receiverAddress,
           amount : req.body.amount,
           usedFee : finalCostEther,
+          IsExternalTrade: IsExternalTrade,
           transactionHash: transactionHash,
         };
-        // console.log('historyData :', historyData);
+        console.log('historyData :', historyData);
 
-        await insertDB('history', historyData, (error, result)=>{
+        await insertDB(token_name+'_history', historyData, (error, result)=>{
           if(error){
             throw error;
           }else{
+            const sign = 'minus';
+            const user_srl = req.body.user_srl;
+            const token_name = req.body.token_name;
+            const totalAmount = req.body.amount + finalCostEther;
+            updateWalletInfo( sign, user_srl, token_name, amount, (result) => {
+              console.log(result);
+            });
+
             res.status(200).send(JSON.stringify({
               result: 'success',
               receipt: receipt,
@@ -258,9 +341,9 @@ router.post('/sendToken', async (req, res) => {
           }
         });
 
+
       }
     });
-    
   
   } catch (error) {
     res.status(500).send({
@@ -285,7 +368,6 @@ async function checkGasStatus(){
 
 //생성한 토큰 잔고 가져오기(확인)
 async function getTokenBalance(token_name, user_address , callback) {
-
   const token_info = {
     token_name: token_name,
   };
@@ -299,7 +381,6 @@ async function getTokenBalance(token_name, user_address , callback) {
     } else {
       // 계약 주소 가져오기
       const TOKEN_ADDRESS = results.deployContract;
-
       // ABI 가져오기
       const artifactPath = path.join(__dirname, '..','artifacts', 'contracts', `${token_name}.sol`, `${token_name}.json`);
       const ERC20_ABI = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
@@ -307,17 +388,36 @@ async function getTokenBalance(token_name, user_address , callback) {
       const web3 = new Web3(process.env.ALCHEMY_TESTNET_RPC_URL);
       const tokenContract = new web3.eth.Contract(ERC20_ABI.abi, TOKEN_ADDRESS);
       const balance = await tokenContract.methods.balanceOf(user_address).call();
-
+      // console.log('check: ',balance);
       const balanceEther = Web3.utils.fromWei(balance.toString(), 'ether');
-      var data = {
-        result: 'success',
-        simbol: results.token_simbol,
-        balance: balanceEther,
-      };
-      callback(data);
+      // console.log('balanceEther: ',balanceEther);
+      // var data = {
+      //   result: 'success',
+      //   simbol: results.token_simbol,
+      //   balance: balanceEther,
+      // };
+      callback(balanceEther);
       // console.log("Token Balance:", balanceEther);
     }}
   );
+}
+
+function checkInternal(token_name , to_address){
+  return new Promise((resolve, reject) => { // Promise를 반환합니다.
+    const checkForm = {
+      token_name: token_name,
+      to_address: to_address,
+    };
+
+    checkAddress(checkForm, (result) => {
+      console.log('res: ', result);
+      if (result.length > 0) {
+        resolve("yes"); // 프로미스를 해결하고 "yes"를 반환합니다.
+      } else {
+        resolve("no"); // 프로미스를 해결하고 "no"를 반환합니다.
+      }
+    });
+  });
 }
 
 

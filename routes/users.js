@@ -10,7 +10,7 @@ require('dotenv').config();
 
 const hre = require("hardhat");
 
-const { insertDB, selectUserDB } = require('../mysql.js');
+const { insertDB, selectUserDB, loginDB } = require('../mysql.js');
 
 /* GET users listing. */
 router.get('/', function(req, res, next) {
@@ -21,12 +21,10 @@ router.get('/', function(req, res, next) {
 router.get('/account/create', function(req, res, next) {
   // const account = web3.eth.accounts.create();
   const account = hre.ethers.Wallet.createRandom();
-  console.log(account);
   res.send('Web3 Create Account');
 });
 
 router.post('/account/signin', async function(req, res, next) {
-  console.log(req.body);
   const user_id = req.body.user_id;
   try {
     await insertDB('users', req.body, async (error, results) => {
@@ -35,7 +33,6 @@ router.post('/account/signin', async function(req, res, next) {
       } else {
         // const account = web3.eth.accounts.create();
         const account = hre.ethers.Wallet.createRandom();
-        console.log(account);
 
         await makeKeyFile(user_id, account.address,'address');
         await makeKeyFile(user_id, account.privateKey,'privateKey');
@@ -47,10 +44,8 @@ router.post('/account/signin', async function(req, res, next) {
         
         await insertDB('walletinfo', user_account, async (error, results) => {
           if (error) {
-            console.log(error);
-            res.status(500).send('월렛 생성 오류');
+            res.status(500).send(error);
           }else {
-            console.log('월렛 생성됨');
             res.status(201).send(`사용자 추가됨: ${results.insertId}`);
           }}
         );
@@ -63,15 +58,13 @@ router.post('/account/signin', async function(req, res, next) {
 });
 
 router.post('/account/login', async function(req, res, next) {
-  console.log(req.body);
-
   try {
-    await selectUserDB('users', req.body, (error, results) => {
+    await loginDB(req.body, (error, results) => {
       if (error) {
-        console.log(error);
-        res.status(500).send('서버 오류 발생');
+        throw error;
       } else {
-        res.status(201).send(`success`);
+        console.log('selectUserDB',results);
+        res.status(201).send({result: 'success', data: results});
       }}
     );
     
@@ -80,7 +73,7 @@ router.post('/account/login', async function(req, res, next) {
   }
 });
 
-router.post('/getAddress' , async function (req, res) {
+router.post('/getEthAddress' , async function (req, res) {
   const user_id = req.body.user_id;
   const address = await fs.readFileSync(`./user/${user_id}/address`, 'utf8');
    res.status(201).send(address);  
@@ -88,9 +81,8 @@ router.post('/getAddress' , async function (req, res) {
 
 router.post('/getAddressBalance', async (req, res) => {
   const address = req.body.address;
-  var result = await getAddressBalance(address);
-  console.log('result :' + result);
-  res.status(201).send(result);
+  const result = await getAddressBalance(address);
+  res.status(201).send({balance: result});
 });
 
 
@@ -118,15 +110,7 @@ async function getAddressBalance(address) {
     const provider = new hre.ethers.AlchemyProvider('sepolia',process.env.ALCHEMY_PRIVATE_KEY);
     const balance = await provider.getBalance(address);
     const balanceEther = hre.ethers.formatEther(balance);
-    // console.log(`The balance of address ${address} is: ${balanceEther} ETH`);
-
-    //web3로 잔고 가져오기
-    // // Get the balance from the blockchain
-    // const balanceWei = await web3.eth.getBalance(address);
-    // // Convert the balance from Wei to Ether
-    // const balanceEther = web3.utils.fromWei(balanceWei, 'ether');
-    
-    return Number(balanceEther).toFixed(3);
+    return balanceEther;
   } catch (error) {
     console.error('Error fetching the balance:', error);
   }
