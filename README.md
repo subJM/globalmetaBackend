@@ -12,4 +12,6 @@ npx hardhat node
 npx hardhat run scripts/deploy.js
 ```
 
+# hardhat 설치
+
 npm install --save-dev hardhat

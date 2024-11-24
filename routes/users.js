@@ -10,7 +10,7 @@ require('dotenv').config();
 
 const hre = require("hardhat");
 
-const { insertDB, selectUserDB, loginDB } = require('../mysql.js');
+const { insertDB, selectUserDB, loginDB, checkUser} = require('../mysql.js');
 
 /* GET users listing. */
 router.get('/', function(req, res, next) {
@@ -24,38 +24,82 @@ router.get('/account/create', function(req, res, next) {
   res.send('Web3 Create Account');
 });
 
-router.post('/account/signin', async function(req, res, next) {
+// var setData = {
+//   user_id: user_id,
+//   user_name: req.body.user_name,
+//   user_email: req.body.user_email,
+//   user_password: req.body.user_password,
+//   user_phone: req.body.user_phone,
+//   user_birth: req.body.user_birth,
+//   user_gender: req.body.user_gender,
+//   user_profile: req.body.user_profile,
+//   user_status: 1,
+//   user_created_at: new Date(),
+//   user_updated_at: new Date()
+// };
+router.post('/account/signin', async function (req, res, next) {
   const user_id = req.body.user_id;
+
+  try {
+    // 유저 아이디 체크
+    const result = await checkUser(user_id);
+
+    if (result.length > 0) {
+      // 아이디가 이미 존재하면 응답 후 종료
+      return res.status(201).send('exist');
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    return res.status(500).send('Internal Server Error');
+  }
+
   try {
     await insertDB('users', req.body, async (error, results) => {
       if (error) {
-        res.status(500).send('서버 오류 발생');
+        return res.status(500).send('서버 오류 발생');
       } else {
-        // const account = web3.eth.accounts.create();
         const account = hre.ethers.Wallet.createRandom();
 
-        await makeKeyFile(user_id, account.address,'address');
-        await makeKeyFile(user_id, account.privateKey,'privateKey');
+        await makeKeyFile(user_id, account.address, 'address');
+        await makeKeyFile(user_id, account.privateKey, 'privateKey');
 
-        var user_account ={};
-        user_account.user_srl = results.insertId;
-        user_account.wallet = 'ETH';
-        user_account.address = account.address;
-        
+        const user_account = {
+          user_srl: results.insertId,
+          wallet: 'ETH',
+          token_name: 'ETH',
+          address: account.address,
+        };
+
         await insertDB('walletinfo', user_account, async (error, results) => {
           if (error) {
-            res.status(500).send(error);
-          }else {
-            res.status(201).send(`사용자 추가됨: ${results.insertId}`);
-          }}
-        );
-     
-      }}
-    );
+            console.log(error);
+            return res.status(500).send(error);
+          }
+        });
+
+        const user_lott_account = {
+          user_srl: results.insertId,
+          wallet: 'LOTT',
+          token_name: 'LOTT',
+          address: account.address,
+        };
+
+        await insertDB('walletinfo', user_lott_account, async (error, results) => {
+          if (error) {
+            console.log(error);
+            return res.status(500).send(error);
+          } else {
+            return res.status(201).send('success');
+          }
+        });
+      }
+    });
   } catch (error) {
-    console.log('error: ' + error);
+    console.error('Error:', error);
+    return res.status(500).send('Internal Server Error');
   }
 });
+
 
 router.post('/account/login', async function(req, res, next) {
   try {
@@ -73,11 +117,13 @@ router.post('/account/login', async function(req, res, next) {
   }
 });
 
+//이더 지갑주소 가져오기
 router.post('/getEthAddress' , async function (req, res) {
   const user_id = req.body.user_id;
   const address = await fs.readFileSync(`./user/${user_id}/address`, 'utf8');
    res.status(201).send(address);  
 });
+
 
 router.post('/getAddressBalance', async (req, res) => {
   const address = req.body.address;
@@ -104,10 +150,14 @@ async function makeKeyFile(user_id,content,fileName){
   });
 }
 
+
+//이더리움 잔고 가져오기
 async function getAddressBalance(address) {
   try {
     //ethers로 잔고 가져오기
-    const provider = new hre.ethers.AlchemyProvider('sepolia',process.env.ALCHEMY_PRIVATE_KEY);
+    // const provider = new hre.ethers.AlchemyProvider('sepolia',process.env.ALCHEMY_PRIVATE_KEY);
+    const provider = new hre.ethers.AlchemyProvider('mainnet',process.env.ALCHEMY_PRIVATE_KEY);
+    // const provider = new hre.ethers.AlchemyProvider('mainnet',process.env.ALCHEMY_PRIVATE_KEY);
     const balance = await provider.getBalance(address);
     const balanceEther = hre.ethers.formatEther(balance);
     return balanceEther;

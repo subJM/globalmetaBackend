@@ -17,8 +17,6 @@ router.get('/', function(req, res, next) {
 });
 
 router.post('/test2', function(req, res, next) {
-  console.log("test2 체크" ,req.body);
-  
   const sign = 'plus';
   const user_srl = req.body.user_srl;
   const token_name = req.body.token_name;
@@ -33,7 +31,8 @@ router.post('/test2', function(req, res, next) {
     IsExternalTrade: 'no',
     transactionHash: '0xf32c0a3e812857cf93f2d361036135c27abf42f158ba96e13568715ce384069d'
   }
-  insertDB('bob_history', historyData, (error, result)=>{
+  var table = token_name+'_history'
+  insertDB(table, historyData, (error, result)=>{
     if(error){
       throw error;
     }else{
@@ -42,7 +41,7 @@ router.post('/test2', function(req, res, next) {
       const token_name = req.body.token_name;
       const totalAmount = req.body.amount + finalCostEther;
       updateWalletInfo( sign, user_srl, token_name, amount, (result) => {
-        console.log(result);
+        // console.log(result);
       });
 
       res.status(200).send(JSON.stringify({
@@ -55,7 +54,7 @@ router.post('/test2', function(req, res, next) {
     }
   });
   updateWalletInfo( sign, user_srl, token_name, amount, (result) => {
-    console.log(result);
+    // console.log(result);
   });
 });
 
@@ -92,7 +91,7 @@ router.post('/test', async function(req, res, next){
           fromBlock: 0,
           toBlock: 'latest'
         });
-        console.log("Received:", receivedEvents);
+        // console.log("Received:", receivedEvents);
 
         res.status(200).send({
           result: 'success',
@@ -104,7 +103,7 @@ router.post('/test', async function(req, res, next){
           fromBlock: 0,
           toBlock: 'latest'
         });
-        console.log("Sent:", events);
+        // console.log("Sent:", events);
         res.status(200).send({
           result: 'success',
           data: events
@@ -114,10 +113,9 @@ router.post('/test', async function(req, res, next){
   });
 });
 
-router.post('/getTokenList', function(req, res, next) {
+router.post('/getTokenList', async function(req, res, next) {
   try {
     const user_srl = req.body.user_srl;
-
     getTokenList(user_srl ,async (error, results) => {
       if(error){
         throw error;
@@ -133,12 +131,11 @@ router.post('/getTokenList', function(req, res, next) {
 })
 
 router.post('/api/etherscan/history', function(req, res, next){
-
-
   const API_KEY = process.env.ETHERSCAN_API_KEY;
   const address = '0x687087daFd0F7849e0Fe0992f474c5790e483B9d';
-  const url = `https://api-sepolia.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${API_KEY}`;
- console.log('url : ' + url);
+  const url = `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${API_KEY}`;
+  // const url = `https://api-sepolia.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${API_KEY}`;
+//  console.log('url : ' + url);
   axios.get(url)
     .then(response => {
       const transactions = response.data.result;
@@ -173,7 +170,7 @@ router.post('/getBalance', async function(req, res, next) {
 router.post('/sendETH/',async(req, res, next) => {
   try {
     
-    console.log('sendETH: ', req.body);
+    // console.log('sendETH: ', req.body);
     //체인 연결
     const web3 = new Web3(process.env.ALCHEMY_TESTNET_RPC_URL);
     //개인키관리
@@ -203,7 +200,7 @@ router.post('/sendETH/',async(req, res, next) => {
 
     const signedTx = await web3.eth.accounts.signTransaction(tx, senderPrivateKey);
     const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
-    console.log('Transaction receipt:', receipt);
+    // console.log('Transaction receipt:', receipt);
 
     // 사용한 가스값 구하기
     const finalCost = receipt.gasUsed * receipt.effectiveGasPrice;
@@ -258,7 +255,7 @@ router.post('/sendToken', async (req, res) => {
     const token_name = req.body.token_name;
     const amount = web3.utils.toWei(req.body.amount, 'ether'); // 100 토큰
     const IsExternalTrade = await checkInternal(token_name , receiverAddress);
-    console.log("IsExternalTrade: " , IsExternalTrade);
+    // console.log("IsExternalTrade: " , IsExternalTrade);
 
     //토큰 ABI 가져오기 
     const artifactPath = path.join(__dirname, '..','artifacts', 'contracts', `${token_name}.sol`, `${token_name}.json`);
@@ -297,7 +294,7 @@ router.post('/sendToken', async (req, res) => {
         const signedTx = await web3.eth.accounts.signTransaction(tx, senderPrivateKey);
         const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
 
-        console.log('Transaction receipt:', receipt);
+        // console.log('Transaction receipt:', receipt);
 
         // 사용한 가스값 구하기
         const finalCost = receipt.gasUsed * receipt.effectiveGasPrice;
@@ -317,7 +314,7 @@ router.post('/sendToken', async (req, res) => {
           IsExternalTrade: IsExternalTrade,
           transactionHash: transactionHash,
         };
-        console.log('historyData :', historyData);
+        // console.log('historyData :', historyData);
 
         await insertDB(token_name+'_history', historyData, (error, result)=>{
           if(error){
@@ -371,6 +368,7 @@ async function getTokenBalance(token_name, user_address , callback) {
   const token_info = {
     token_name: token_name,
   };
+  console.log(token_info);
   await findTokenContractAddress(token_info, async (error, results) => {
     if (error) {
       var data = {
@@ -379,10 +377,12 @@ async function getTokenBalance(token_name, user_address , callback) {
       };
       callback(data);
     } else {
+  
       // 계약 주소 가져오기
       const TOKEN_ADDRESS = results.deployContract;
       // ABI 가져오기
-      const artifactPath = path.join(__dirname, '..','artifacts', 'contracts', `${token_name}.sol`, `${token_name}.json`);
+      // const artifactPath = path.join(__dirname, '..','artifacts', 'contracts', `${token_name}.sol`, `${token_name}.json`);
+      const artifactPath = path.join(__dirname, '..','artifacts', 'contracts',`${token_name}.json`);
       const ERC20_ABI = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
 
       const web3 = new Web3(process.env.ALCHEMY_TESTNET_RPC_URL);

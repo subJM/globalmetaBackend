@@ -11,6 +11,8 @@ var contractRouter = require('./routes/contract');
 var tokenRouter = require('./routes/token');
 var walletRouter = require('./routes/wallet');
 var noticeRouter = require('./routes/notice');
+var tronRouter = require('./routes/tron');
+var lottRouter = require('./routes/lott');
 const cors = require('cors');
 
 var app = express();
@@ -20,7 +22,8 @@ var app = express();
 // app.set('view engine', 'jade');
 
 app.use(cors({
-  origin: 'http://localhost:8080'
+  // origin: 'http://1.231.89.30:8080'
+  origin: ['http://127.0.0.1:8080', 'http://localhost:8080', 'http://1.231.89.30:8081', 'http://1.231.89.30:8080']
 }));
 app.use(logger('dev'));
 app.use(express.json());
@@ -34,9 +37,12 @@ app.use('/contract', contractRouter);
 app.use('/token', tokenRouter);
 app.use('/wallet', walletRouter);
 app.use('/notice', noticeRouter);
+app.use('/tron', tronRouter);
+app.use('/lott', lottRouter);
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
+  console.log(`Incoming request from: ${req.ip}, URL: ${req.url}`);
   next(createError(404));
 });
 

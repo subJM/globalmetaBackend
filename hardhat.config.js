@@ -10,10 +10,14 @@ module.exports = {
     sepolia: {
       url: process.env.ALCHEMY_TESTNET_RPC_URL, 
     },
+    mainnet: {
+      url: process.env.ALCHEMY_TESTNET_RPC_URL, 
+    },
   },
   etherscan: {
     apiKey: {
       sepolia: process.env.ETHERSCAN_API_KEY,
+      mainnet: process.env.ETHERSCAN_API_KEY,
     }
   },
 
