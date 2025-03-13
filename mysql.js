@@ -21,7 +21,6 @@ const pool = mysql.createPool({
     database: process.env.DATABASE,
     timezone: process.env.TIMEZONE,
 });
-
 const loginDB = async (where, callback) => {
     pool.getConnection((err, connection) => {
         if (err) {
@@ -35,75 +34,80 @@ const loginDB = async (where, callback) => {
         });
     });
 };
-
 const insertDB = (table, setData, callback) => {
-    let callbackCalled = false; // 콜백 중복 호출 방지 플래그
-  
-    pool.getConnection((err, connection) => {
-      if (err) {
-        if (!callbackCalled) {
-          callbackCalled = true;
-          callback(err, null);
-        }
-        return;
-      }
-  
-      const checkTableQuery = `SHOW TABLES LIKE '${table}'`;
-      connection.query(checkTableQuery, (error, results) => {
-        if (error) {
-          if (!callbackCalled) {
-            callbackCalled = true;
-            callback(error, null);
-          }
-          connection.release();
-          return;
-        }
-  
-        const insertData = () => {
-          const insertQuery = `INSERT INTO ${table} SET ?`;
-          connection.query(insertQuery, setData, (insertError, insertResults) => {
-            if (!callbackCalled) {
-              callbackCalled = true;
-              callback(insertError, insertResults);
+    return new Promise((resolve, reject) => {
+        let callbackCalled = false; // 콜백 중복 호출 방지 플래그
+
+        pool.getConnection((err, connection) => {
+            if (err) {
+                if (callback && !callbackCalled) {
+                    callbackCalled = true;
+                    callback(err, null);
+                }
+                return reject(err);
             }
-            connection.release();
-          });
-        };
-  
-        if (results.length === 0) {
-          const createTableQuery = `CREATE TABLE ${table} (
-              id int NOT NULL AUTO_INCREMENT,
-              token_name varchar(45) NOT NULL,
-              user_srl int NOT NULL,
-              user_id varchar(45) NOT NULL,
-              from_address varchar(100) NOT NULL,
-              to_address varchar(100) NOT NULL,
-              amount decimal(50,18) NOT NULL,
-              usedFee decimal(50,18) NOT NULL,
-              IsExternalTrade varchar(45) NOT NULL DEFAULT 'no',
-              transactionHash varchar(255) NOT NULL,
-              status varchar(45) NOT NULL DEFAULT 'pending',
-              create_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              PRIMARY KEY (id)
-            ) ENGINE=InnoDB;`;
-  
-          connection.query(createTableQuery, (createError) => {
-            if (createError) {
-              if (!callbackCalled) {
-                callbackCalled = true;
-                callback(createError, null);
-              }
-              connection.release();
-              return;
-            }
-            insertData(); // 테이블 생성 후 데이터 삽입
-          });
-        } else {
-          insertData(); // 테이블 존재 시 데이터 삽입
-        }
-      });
+
+            const checkTableQuery = `SHOW TABLES LIKE '${table}'`;
+            connection.query(checkTableQuery, (error, results) => {
+                if (error) {
+                    if (callback && !callbackCalled) {
+                        callbackCalled = true;
+                        callback(error, null);
+                    }
+                    connection.release();
+                    return reject(error);
+                }
+
+                const insertData = () => {
+                    const insertQuery = `INSERT INTO ${table} SET ?`;
+                    connection.query(insertQuery, setData, (insertError, insertResults) => {
+                        if (callback && !callbackCalled) {
+                            callbackCalled = true;
+                            callback(insertError, insertResults);
+                        }
+                        connection.release();
+                        if (insertError) return reject(insertError);
+                        resolve(insertResults);
+                    });
+                };
+
+                if (results.length === 0) {
+                    const createTableQuery = `CREATE TABLE ${table} (
+                        id int NOT NULL AUTO_INCREMENT,
+                        token_name varchar(45) NOT NULL,
+                        user_srl int NOT NULL,
+                        user_id varchar(45) NOT NULL,
+                        type varchar(45) DEFAULT 'withdraw' COMMENT '''withdraw'' , ''deposit''',
+                        from_address varchar(100) NOT NULL,
+                        to_address varchar(100) NOT NULL,
+                        amount decimal(50,18) NOT NULL,
+                        usedFee decimal(50,18) NOT NULL,
+                        IsExternalTrade varchar(45) NOT NULL DEFAULT 'no',
+                        transactionHash varchar(255) NOT NULL,
+                        status varchar(45) DEFAULT 'pending' COMMENT '전송 완료:COMPLETE,전송중:PENDING,실패:FAIL',
+                        create_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (id)
+                    ) ENGINE=InnoDB`;
+
+                    connection.query(createTableQuery, (createError) => {
+                        if (createError) {
+                            if (callback && !callbackCalled) {
+                                callbackCalled = true;
+                                callback(createError, null);
+                            }
+                            connection.release();
+                            return reject(createError);
+                        }
+                        insertData(); // 테이블 생성 후 데이터 삽입
+                    });
+                } else {
+                    insertData(); // 테이블 존재 시 데이터 삽입
+                }
+            });
+        });
     });
-  };
+};
+
 
 const selectHistoryDB = async (where, callback) => {
     const query = `SELECT a.user_id, username, email, wallet, address FROM users a 
@@ -150,15 +154,25 @@ const getTokenList = async (user_srl, callback) => {
 
 const getWalletBalance = async (user_srl, callback) => {
     const query = `SELECT * FROM globalmeta.walletinfo WHERE user_srl = ?`;
-    console.log(user_srl);
     pool.query(query, [user_srl], (error, results) => {
         callback(error, results);
     });
 };
 
 const checkAddress = async (checkForm, callback) => {
-    const query = `SELECT * FROM globalmeta.walletinfo WHERE token_name = ? AND address = ?`;
-    const queryParams = [checkForm.token_name, checkForm.to_address];
+    let query = `SELECT * FROM globalmeta.walletinfo WHERE token_name = ? `;
+    let queryParams = [checkForm.token_name];  // Always include token_name first
+    // Conditionally add additional filters to the query and parameters
+    if (checkForm.to_address) {
+        query += `AND address = ? `;
+        queryParams.push(checkForm.to_address);
+    }
+    if (checkForm.user_srl) {
+        query += `AND user_srl = ? `;
+        queryParams.push(checkForm.user_srl);
+    }
+
+    // Execute the query
     pool.query(query, queryParams, (error, results) => {
         callback(error, results);
     });
@@ -179,6 +193,14 @@ const updateWallet = async (user_srl, token_name, balance, callback) => {
                    SET balance = ? 
                    WHERE user_srl = ? AND token_name = ?`;
     pool.query(query, [balance, user_srl, token_name], (error, results) => {
+        callback(error, results);
+    });
+};
+
+const updateWalletAccount = async (data ,callback) => {
+
+    const query = `UPDATE globalmeta.walletinfo SET address = ? WHERE user_srl = ? and token_name = ? `;
+    pool.query(query, [data.address, data.user_srl, data.token_name], (error, results) => {
         callback(error, results);
     });
 };
@@ -230,7 +252,7 @@ const getNoticeDetail =async (noticeId, callback) => {
 // 지갑 송금내역
 const getAddressSendHistory = async (data, callback) => {
     // 화이트리스트로 테이블 이름 검증
-    const allowedCoins = ["BTC", "ETH", "TRX", "TRON", "EVC"]; // 허용된 코인 이름 리스트
+    const allowedCoins = ["BTC", "ETH", "TRX", "TRON", "EVC", "LOTT"]; // 허용된 코인 이름 리스트
     if (!allowedCoins.includes(data.coin_name)) {
       return callback(new Error("Invalid coin_name provided"), null);
     }
@@ -266,7 +288,7 @@ const getAllHistory = async (token_name, callback) => {
                    FROM globalmeta.${token_name}_history
                    WHERE status != "complete" AND status != "failed"`;
     pool.query(query, [], (error, results) => {
-        console.log(results);
+        // console.log(results);
         callback(error, results);
     });
 };
@@ -290,25 +312,27 @@ const historyUpdate = async (history, callback) => {
 // UPDATE globalmeta.tron_history SET status = "complete" WHERE ("id" = ?)
 //hisotry 오류난것 삭제
 const historyDelete = async (history, callback) => {
-    console.log(history);
+    // console.log(history);
     const query = `DELETE FROM globalmeta.${history.coin_name}_history WHERE transactionHash = ? ;
 `;
     pool.query(query, [history.status , history.transactionHash], (error, results) => {
         callback(error, results);
     });
 };
-const checkUser = (user_id) => {
-    return new Promise((resolve, reject) => {
-      const query = `SELECT * FROM globalmeta.users WHERE user_id = ?`;
-      pool.query(query, [user_id], (error, results) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve(results);
-        }
-      });
+const checkUser = (user_id, user_email) => {
+  return new Promise((resolve, reject) => {
+    const query = `SELECT * FROM globalmeta.users WHERE user_id = ? or email = ?`;
+    pool.query(query, [user_id, user_email], (error, results) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(results);
+      }
     });
-  };
+  });
+};
+
+
 // 모듈로 내보내기
 module.exports = {
     insertDB,
@@ -332,4 +356,5 @@ module.exports = {
     historyUpdate,
     historyDelete,
     checkUser,
+    updateWalletAccount,
 };

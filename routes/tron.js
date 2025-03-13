@@ -4,7 +4,7 @@ var router = express.Router();
 const {Web3} = require('web3');
 const fs = require('fs');
 const path = require('path');
-const {getAddressSendHistory , insertDB ,getTokenList, checkAddress , updateWalletInfo, getAllHistory, historyUpdate, historyDelete,checkUser} = require('../mysql');
+const {getAddressSendHistory , insertDB ,getTokenList, checkAddress , updateWalletInfo, getAllHistory, historyUpdate, historyDelete,checkUser, updateWallet , updateWalletAccount} = require('../mysql');
 const { threadId } = require('worker_threads');
 const { throws } = require('assert');
 const BigNumber = require('bignumber.js');
@@ -27,63 +27,130 @@ const EVCtokenContractAddress = "TNmtt9SBLsHmzAUvdwsbnH2aK4Gbnocagy";
 /* GET home page. */
 // const privateKey = await fs.readFileSync(`./user/${user_id}/privateKey`, 'utf8');
 
-
-// const tronWeb = new TronWeb({
-//   fullHost: 'https://api.trongrid.io',
-//   headers: { 'TRON-PRO-API-KEY': '882abac6-31cd-4bb4-8587-ae84d84f8a5b' },
-//   privateKey: privateKey
-// });
-
-router.post('/create/account', async function(req, res, next) {
+router.post('/create_account', async function (req, res, next) {
   const user_id = req.body.user_id;
-  
+  const email = req.body.email;
+
   try {
 
+    const result = await checkUser(user_id , email);
+    if (result.length > 0) {
+      // 아이디가 이미 존재하면 응답 후 종료
+      return res.status(201).send('exist');
+    };
 
     // TronWeb 인스턴스 생성
     const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
+
+    // users 테이블에 데이터 삽입
+    const userResults = await insertDB('users', req.body);
     
-    await insertDB('users', req.body, async (error, results) => {
-      if (error) {
-        res.status(500).send('서버 오류 발생');
-      } else {
-        const account = tronWeb.createAccount();
-        account.then( async (account_result) => {
-            await makeKeyFile(user_id, account_result.address.base58,'address');
-            await makeKeyFile(user_id, account_result.address.hex,'hex');
-            await makeKeyFile(user_id, account_result.publicKey,'publicKey');
-            await makeKeyFile(user_id, account_result.privateKey,'privateKey');
-            
-            var user_account ={};
-            user_account.user_srl = results.insertId;
-            user_account.wallet = 'TRON';
-            user_account.token_name = 'TRON';
-            user_account.address = account_result.address.base58;
-            // console.log(user_account);
-            await insertDB('walletinfo', user_account, async (error, results) => {
-              if (error) {
-                res.status(500).send(error);
-              }else {
-                /* res.status(201).send(`사용자 추가됨: ${results.insertId}`); */
-              }}
-            );
-            var user_token_account = {};
-            user_token_account.user_srl = results.insertId;
-            user_token_account.wallet = 'TRON';
-            user_token_account.token_name = 'EVC';
-            user_token_account.address = account_result.address.base58;
+    // Tron 계정 생성
+    const account_result = await tronWeb.createAccount();
+
+    // 키 파일 생성
+    await Promise.all([
+      makeKeyFile(user_id, account_result.address.base58, 'address'),
+      makeKeyFile(user_id, account_result.address.hex, 'hex'),
+      makeKeyFile(user_id, account_result.publicKey, 'publicKey'),
+      makeKeyFile(user_id, account_result.privateKey, 'privateKey'),
+    ]);
+
+    // walletinfo 테이블에 데이터 삽입
+    const walletData = [
+      {
+        user_srl: userResults.insertId,
+        wallet: 'TRON',
+        token_name: 'TRON',
+        address: account_result.address.base58,
+      },
+      {
+        user_srl: userResults.insertId,
+        wallet: 'TRON',
+        token_name: 'EVC',
+        address: account_result.address.base58,
+      },
+    ];
+
+    for (const data of walletData) {
+      await insertDB('walletinfo', data);
+    }
+
+    // 성공 응답
+    res.status(201).send('success');
+    // res.status(201).send({result:"success", privateKey: account_result.privateKey});
+  } catch (error) {
+    console.error('error:', error);
+    res.status(500).send('서버 오류 발생');
+  }
+});
 
 
-            await insertDB('walletinfo', user_token_account, async (error, results) => {
-              if (error) {
-                res.status(500).send(error);
-              }else {
-                res.status(201).send("success");
-              }}
-            );
-        });
-      }}
-    );
+router.post('/recreate/account', async function(req, res, next) {
+  const user_id = req.body.user_id;
+  const user_srl = req.body.user_srl;
+
+  try {
+    // TronWeb 인스턴스 생성
+    const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
+    const filePath = path.join(__dirname, `./user/${user_id}/TRON/address`);
+    console.log("recreate/account");
+    if (!fs.existsSync(filePath)) {
+      const account = tronWeb.createAccount();
+      account.then( async (account_result) => {
+          await makeKeyFile(user_id, account_result.address.base58,'address');
+          await makeKeyFile(user_id, account_result.address.hex,'hex');
+          await makeKeyFile(user_id, account_result.publicKey,'publicKey');
+          await makeKeyFile(user_id, account_result.privateKey,'privateKey');
+
+          var user_account ={};
+          user_account.user_srl = user_srl;
+          user_account.wallet = 'TRON';
+          user_account.token_name = 'TRON';
+          user_account.address = account_result.address.base58;
+          console.log(user_account);
+
+          await checkAddress(user_account, async( error, results)=>{
+            if(results.length > 0){
+              await updateWalletAccount(user_account, async (error, results) => {
+                if (error) {
+                  res.status(500).send(error);
+                }
+              });
+            }else{
+              await insertDB('walletinfo', user_account, async (error, results) => {
+                if (error) {
+                  res.status(500).send(error);
+                }
+              });
+            }
+          });
+          var user_token_account = {};
+          user_token_account.user_srl = user_srl;
+          user_token_account.wallet = 'TRON';
+          user_token_account.token_name = 'EVC';
+          user_token_account.address = account_result.address.base58;
+
+          await checkAddress(user_token_account, async( error, results)=>{
+            if(results.length > 0){
+              await updateWalletAccount(user_token_account, async (error, results) => {
+                if (error) {
+                  res.status(500).send(error);
+                }
+              });
+            }else{
+              await insertDB('walletinfo', user_token_account, async (error, results) => {
+                if (error) {
+                  res.status(500).send(error);
+                }
+              });
+            }
+          });
+          res.status(201).send({result: "success" , address: account_result.address.base58});
+      });
+    } else {
+      console.log(`${keyType} 파일이 이미 존재합니다.`);
+    }
   } catch (error) {
     console.log('error: ' + error);
   }
@@ -94,6 +161,7 @@ router.post('/getTronAddress', async function (req, res, next) {
     const user_id = req.body.user_id;
     // 비동기 방식으로 파일 읽기
     const address = fs.readFileSync(`./user/${user_id}/TRON/address`, 'utf8');
+    // const address = decryptPrivateKey(key);
     res.status(201).send({ address: address });
   } catch (error) {
     console.error('Error reading address file:', error);
@@ -105,7 +173,6 @@ router.post('/getTronAddress', async function (req, res, next) {
 
 
 router.post('/getAddressBalance', async function(req, res, next) {
-
   var address = req.body.address;
   // TronWeb 인스턴스 생성
   const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
@@ -128,7 +195,7 @@ router.post('/getAddressBalance', async function(req, res, next) {
 
 router.post('/getAddressTokenBalance', async function(req, res, next) {
   const userAddress = req.body.address;
-  
+
     // TronWeb 인스턴스 생성
     const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
 
@@ -141,7 +208,7 @@ router.post('/getAddressTokenBalance', async function(req, res, next) {
     // 계약 인스턴스 가져오기
     const contract = await tronWeb.contract().at(EVCtokenContractAddress);
     tronWeb.setAddress(userAddress);
-    
+
     // 사용자 주소의 잔액을 가져옵니다.
     let balance = 0;
     try {
@@ -167,16 +234,24 @@ router.post('/getAddressTokenBalance', async function(req, res, next) {
 });
 
 
+
 router.post('/transfer', async function(req, res, next) {
-  const user_id = req.body.user_id;
-  const user_srl = req.body.user_srl;
-  const token_name = req.body.token_name;
-  const senderAddress = req.body.from_address;
-  const receiverAddress = req.body.to_address;
-  const amount = req.body.amount; // 실제 전송할 토큰 수량 (예: 1)
-  
-  if (isNaN(amount) || amount <= 0) {
-    return res.status(400).send({ result: 'error', message: 'Invalid amount provided' });
+  const user_srl =req.body.user_srl;
+  const user_id =req.body.user_id;
+  const senderAddress =req.body.from_address;
+  const receiverAddress =req.body.to_address;
+  const token_name =req.body.token_name;
+  const amount =req.body.amount;
+  // const privateKey = req.body.key;
+  // 유효성 검사
+  if (!user_id || !user_srl || !senderAddress || !receiverAddress || isNaN(amount) || amount <= 0) {
+    return res.status(400).send({ result: 'error', message: 'Invalid input parameters' });
+  };
+
+  const email = req.body.email;
+  const result = await checkUser(user_id , email);
+  if(result[0]['block'] == 'YES'){
+    return res.status(200).send({result: 'error', message: '잠겨있어 전송할수 없습니다.'});
   }
 
   const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8').trim();
@@ -188,54 +263,55 @@ router.post('/transfer', async function(req, res, next) {
       privateKey,
     });
 
-    const contract = await tronWeb.contract().at(EVCtokenContractAddress);
+    // 전송량을 Sun 단위로 변환 (1 TRX = 1,000,000 Sun)
+    const trxAmount = parseInt(amount) * 1_000_000;
 
-    const decimals = 18;
-    const tokenAmount = BigInt(amount) * BigInt(10) ** BigInt(decimals);
+    // 트랜잭션 생성
+    const transaction = await tronWeb.transactionBuilder.sendTrx(receiverAddress, trxAmount, senderAddress);
 
-    const transaction = await contract.methods.transfer(receiverAddress, tokenAmount).send({
-      from: senderAddress,
-    });
+    // 트랜잭션 서명
+    const signedTx = await tronWeb.trx.sign(transaction, privateKey);
 
-    console.log('Transaction result:', transaction);
-    // Transaction result: e3190c6f6fc6ee1daf15d631adf814b5766e16b2facbba7d4a33b589337c1609
+    // 트랜잭션 전송
+    const result = await tronWeb.trx.sendRawTransaction(signedTx);
 
+    // console.log('Transaction Result:', result);
 
-    if (!transaction ) {
-      throw new Error('Transaction failed or txID missing');
+    if (!result || !result.result) {
+      throw new Error('Transaction failed. Details: ' + JSON.stringify(result));
     }
 
+    // 트랜잭션 기록
     const historyData = {
-      token_name:token_name,
-      user_srl:user_srl,
-      user_id:user_id,
+      token_name: token_name,
+      user_srl: user_srl,
+      user_id: user_id,
       from_address: senderAddress,
       to_address: receiverAddress,
       amount: amount,
-      usedFee: 0,
+      usedFee: 0, // 실제 사용된 Fee는 이후 확인하여 업데이트 가능
       IsExternalTrade: 'true',
-      transactionHash: transaction,
+      transactionHash: result.txid,
     };
-console.log("send historyData: "+ historyData);
+// console.log(historyData);
     try {
-      insertDB(token_name + '_history', historyData, (error , result)=>{
-        if(error){
+      insertDB(`${token_name}_history`, historyData, (error, result) => {
+        if (error) {
+          console.error('Database insert error:', error);
           return res.status(500).send({ result: 'error', message: 'Failed to save transaction history' });
         }
-        return res.status(200).send({ result: 'success' });
+        return res.status(200).send({ result: 'success', transaction: result });
       });
     } catch (dbError) {
       console.error('Database insert error:', dbError);
       return res.status(500).send({ result: 'error', message: 'Failed to save transaction history' });
     }
 
-
   } catch (error) {
-    console.error('Transaction error:', error);
-    res.status(500).send({ result: 'error', message: 'Failed to transfer token', error: error.message });
+    console.error('Transaction Error:', error);
+    res.status(500).send({ result: 'error', message: 'Failed to transfer TRX', error: error.message });
   }
 });
-
 router.post('/transferToken', async function (req, res) {
   const { user_id, user_srl, token_name, from_address: senderAddress, to_address: receiverAddress, amount } = req.body;
 
@@ -244,6 +320,7 @@ router.post('/transferToken', async function (req, res) {
   }
 
   const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8').trim();
+  // const privateKey = decryptPrivateKey(key);
 
   try {
     const tronWeb = new TronWeb({
@@ -303,7 +380,7 @@ router.post('/transferToken', async function (req, res) {
     };
 
     await new Promise((resolve, reject) => {
-      insertDB(`${token_name}_history`, historyData, (error) => {
+      insertDB(`${token_name.toUpperCase()}_history`, historyData, (error) => {
         if (error) {
           console.error('Database insert error:', error);
           return reject(error);
@@ -339,22 +416,27 @@ router.get('/tron/getBalance',  function(req, res, next) {
   });
 });
 
-async function makeKeyFile(user_id,content,fileName){
-  const isExists = fs.existsSync(`/user/${user_id}/TRON`);
-  if(!isExists){
-    await fs.mkdir(`./user/${user_id}/TRON`, { recursive: true }, (err) =>{
-      console.error(err);
-      return;
-    });
-  }
-  fs.writeFile(`./user/${user_id}/TRON/${fileName}`, content, (err) => {
-      if (err) {
-          console.error('파일 쓰기 중 오류 발생:', err);
-          return;
+async function makeKeyFile(user_id, content, fileName) {
+  // 디렉토리 존재 확인
+  const dirPath = `./user/${user_id}/TRON`;
+  if (!fs.existsSync(dirPath)) {
+      try {
+          fs.mkdirSync(dirPath, { recursive: true });
+      } catch (err) {
+          console.error('디렉토리 생성 중 오류 발생:', err);
+          throw err; // 에러를 호출자에게 전달
       }
+  }
+
+  // 파일 생성
+  try {
+      fs.writeFileSync(`${dirPath}/${fileName}`, content);
       console.log('파일이 성공적으로 생성되었습니다.');
       return "SUCCESS";
-  });
+  } catch (err) {
+      console.error('파일 쓰기 중 오류 발생:', err);
+      throw err; // 에러를 호출자에게 전달
+  }
 }
 
 
@@ -547,7 +629,7 @@ router.post('/removePendingTransaction', function (req, res) {
 // 수동 송금 내역 확인 및 일괄 업데이트
 router.get('/checkTransactionStatus', async function (req, res) {
   try {
-    var coinList = ["tron","evc"];
+    var coinList = ["TRON","EVC"];
     // var coinList = ["tron"];
     const delay = 300; // 요청 간 200ms 지연 (초당 약 5개 요청)
 
@@ -614,7 +696,7 @@ router.get('/statusManager', async function (req, res) {
 
 async function statusManager(){
   try {
-    var coinList = ["tron","evc"];
+    var coinList = ["TRON","EVC"];
     // var coinList = ["tron"];
     const delay = 300; // 요청 간 200ms 지연 (초당 약 5개 요청)
 
@@ -754,36 +836,77 @@ router.post('/getAddressSendHistory', async function (req, res) {
   }
 });
 
-// 스테이킹 테스트
-router.get('/stakingtest', async function (req, res) {
-  const user_id = "test2";
-  const freezeAmount = 10000000; // 스테이킹할 금액 (10 TRX = 10,000,000 Sun)
-  const freezeDays = 3; // 스테이킹 기간 (3일)
-  const resourceType = 'ENERGY'; // 에너지 확보를 위한 설정
-
-  const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8');
+// 스테이킹 테스트(확인 완료)
+router.post('/staking', async function (req, res) {
+  // const user_id = "test2";
+  // const freezeAmount = 5; // 스테이킹할 금액 (5 TRX = 5,000,000 Sun)
+  const user_id = req.body.user_id;
+  const freezeAmount = req.body.amount; // 스테이킹할 금액 (5 TRX = 5,000,000 Sun)
+  // const resourceType = 'ENERGY'; // 리소스 타입
+  const resourceType = req.body.stakingType; // 리소스 타입
+  const address = req.body.address;
+  const privateKeyPath = `./user/${user_id}/TRON/privateKey`;
 
   try {
+    // Private Key 읽기 및 정리
+    let privateKey = fs.readFileSync(privateKeyPath, 'utf8').trim();
+    console.log("Raw private key:", privateKey);
 
-    // TronWeb 인스턴스 생성
-    // const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
+    // 개인 키 유효성 검사
+    if (!/^([A-Fa-f0-9]{64})$/.test(privateKey)) {
+      throw new Error("Invalid private key format. Must be a 64-character hex string.");
+    }
 
     const tronWeb = new TronWeb({
       fullHost: 'https://api.trongrid.io',
-      headers: { 'TRON-PRO-API-KEY': '882abac6-31cd-4bb4-8587-ae84d84f8a5b' },
+      headers: { 'TRON-PRO-API-KEY': tronapikey },
       privateKey: privateKey
     });
-  
-    const freezeTx = await tronWeb.trx.freezeBalance(freezeAmount, freezeDays, resourceType, senderAddress);
-    const signedFreezeTx = await tronWeb.trx.sign(freezeTx, privateKey);
-    const freezeResult = await tronWeb.trx.sendRawTransaction(signedFreezeTx);
-    console.log('Energy Staking Result:', freezeResult);
-  } catch (error) {
-    console.error('Staking Error:', error);
-  }
 
+    // 잔액 확인
+    const balance = await tronWeb.trx.getBalance(address);
+    console.log("Account balance (SUN):", balance);
+
+    if (balance < freezeAmount) {
+      throw new Error("Insufficient balance for staking.");
+    }
+
+    // Freeze Transaction 생성
+    console.log('Creating freeze transaction...');
+    // const freezeTx = await tronWeb.trx.freezeBalance(freezeAmount, freezeDays, resourceType, address ,address);
+      const freezeTx = await tronWeb.transactionBuilder.freezeBalanceV2(tronWeb.toSun(freezeAmount), resourceType, address);
+      console.log(freezeTx);
+      // {
+      //   visible: false,
+      //   txID: 'f0b6922ad8f9464ef5bfd51f28f730e7c660c406e5f7bdbeabe556a0e0916754',
+      //   raw_data_hex: '0a021871220857cb9a40baa7331d40989fe48eb7325a5a080b12560a32747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e467265657a6542616c616e6365436f6e747261637412200a154185d2ddc924c32bbb78318b5895492ae6d55f166210c096b1021803500170b8cae08eb732',
+      //   raw_data: {
+      //     contract: [ [Object] ],
+      //     ref_block_bytes: '1871',
+      //     ref_block_hash: '57cb9a40baa7331d',
+      //     expiration: 1732781871000,
+      //     timestamp: 1732781811000
+      //   }
+      // }
+      console.log("Freeze transaction created:", freezeTx);
+
+      const signedFreezeTx = await tronWeb.trx.sign(freezeTx, privateKey);
+      console.log("Transaction signed:", signedFreezeTx);
+  
+      const freezeResult = await tronWeb.trx.sendRawTransaction(signedFreezeTx);
+      console.log('Energy Staking Result:', freezeResult);
+      stakingInsert();
+  
+      res.status(200).json({ success: true, result: freezeResult });
+
+  } catch (error) {
+    console.error('Staking Error:', error.message || error);
+    res.status(500).json({ success: false, error: error.message || 'Unknown error', details: error });
+  }
 });
-//스테이킹 확인
+
+
+//계정 스테이킹 정보 확인
 router.get('/stakingtest2', async function (req, res) {
   const user_id = "test2";
   const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8');
@@ -791,9 +914,10 @@ router.get('/stakingtest2', async function (req, res) {
 
   const tronWeb = new TronWeb({
     fullHost: 'https://api.trongrid.io',
-    headers: { 'TRON-PRO-API-KEY': '882abac6-31cd-4bb4-8587-ae84d84f8a5b' },
+    headers: { 'TRON-PRO-API-KEY': tronapikey },
     privateKey: privateKey
   });
+
   const resources = await tronWeb.trx.getAccountResources(address);
   // 1 Bandwidth = 1 TRX / 1000 바이트.
   // Account Resources: {
@@ -805,35 +929,87 @@ router.get('/stakingtest2', async function (req, res) {
   //   TotalEnergyLimit: 180000000000,
   //   TotalEnergyWeight: 14837971189
   // }
-  console.log('Account Resources:', resources);
-});1
-//스테이킹 하기
-router.get('/stakingtest2', async function (req, res) {
+
+  // 무료 대역폭 출력
+  const availableFreeNet = resources.freeNetLimit || 0;
+
+  // 네트워크 전체 대역폭 및 에너지 출력
+  const totalNetLimit = resources.TotalNetLimit || 0;
+  const totalEnergyLimit = resources.TotalEnergyLimit || 0;
+
+  // 결과 출력
+    console.log('Account Resources:', resources);
+  console.log('Available Free Bandwidth:', availableFreeNet);
+  console.log('Total Network Bandwidth Limit:', totalNetLimit);
+  console.log('Total Network Energy Limit:', totalEnergyLimit);
+
+
+  // 계정에서 사용 가능한 에너지와 대역폭 정보 출력
+  console.log('Available Energy:', resources.EnergyLimit - resources.EnergyUsed);
+  console.log('Available Bandwidth:', resources.netLimit - resources.netUsed);
+  // 결과 반환
+  res.status(200).json({
+    success: true,
+    freeNetLimit: availableFreeNet,
+    totalNetLimit: totalNetLimit,
+    totalEnergyLimit: totalEnergyLimit,
+    fullResources: resources
+  });
+  
+
+});
+//스테이킹 금액 확인
+router.get('/checkStaking', async function (req, res) {
   const user_id = "test2";
   const address = "TNAoUphvyDWZiVnBjivZzoeJZLKUpqHj4D";
-  const freezeAmount = 10000000; // 스테이킹할 금액 (10 TRX = 10,000,000 Sun)
-  const freezeDays = 3; // 스테이킹 기간 (3일)
-  const resourceType = 'ENERGY'; // 에너지 확보를 위한 설정
 
   try {
     const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8');
+
     const tronWeb = new TronWeb({
       fullHost: 'https://api.trongrid.io',
-      headers: { 'TRON-PRO-API-KEY': '882abac6-31cd-4bb4-8587-ae84d84f8a5b' },
+      headers: { 'TRON-PRO-API-KEY': tronapikey },
       privateKey: privateKey
     });
-    const freezeTx = await tronWeb.trx.freezeBalance(freezeAmount, freezeDays, resourceType, address);
-    const signedFreezeTx = await tronWeb.trx.sign(freezeTx, privateKey);
-    const freezeResult = await tronWeb.trx.sendRawTransaction(signedFreezeTx);
-    console.log('Energy Staking Result:', freezeResult);
-    const resources = await tronWeb.trx.getAccountResources(address);
-    console.log('Account Resources:', resources);
+
+    console.log('Fetching account details...');
+    const account = await tronWeb.trx.getAccount(address);
+
+    // frozenV2 정보에서 스테이킹 금액 확인
+    const frozenV2 = account.frozenV2 || [];
+    let stakedForBandwidth = 0;
+    let stakedForEnergy = 0;
+console.log(frozenV2);
+    if (frozenV2.length > 0) {
+      frozenV2.forEach(item => {
+        if (item.amount && item.amount !== 0) {
+          if (item.type === 'ENERGY') {
+            stakedForEnergy += item.amount; // 에너지에 스테이킹된 금액
+          } else if (item.type === 'TRON_POWER') {
+            stakedForBandwidth += item.amount; // 대역폭에 스테이킹된 금액
+          }
+        }
+      });
+    }
+
+    console.log('Staked for Bandwidth (TRX):', stakedForBandwidth / 1e6);
+    console.log('Staked for Energy (TRX):', stakedForEnergy / 1e6);
+
+    // 결과 반환
+    return res.status(200).json({
+      success: true,
+      stakedForBandwidth: stakedForBandwidth / 1e6, // TRX 단위
+      stakedForEnergy: stakedForEnergy / 1e6, // TRX 단위
+      accountDetails: account
+    });
   } catch (error) {
-    console.error('Staking Error:', error);
+    console.error('Error fetching staking info:', error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
+
 //호출 비용 확인
-router.get('/stakingtest3', async function (req, res) {
+router.get('/stakingtest4', async function (req, res) {
   const user_id = "test2";
   const address = "TNAoUphvyDWZiVnBjivZzoeJZLKUpqHj4D";
   const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8');
@@ -1000,9 +1176,21 @@ console.log("Energy Calculation Result:", {
 }
 
 router.get('/test', async function (req, res) {
-  const user_id = "test2";
-  const address = "TNAoUphvyDWZiVnBjivZzoeJZLKUpqHj4D";
-  getStakingAmount(user_id, address);
+  // const user_id = "test2";
+  // const address = "TNAoUphvyDWZiVnBjivZzoeJZLKUpqHj4D";
+  // getStakingAmount(user_id, address);
+  // var user_token_account = {
+  //   user_srl: '21',
+  //   wallet: 'TRON',
+  //   token_name: 'TRON',
+  //   address: 'TPhgM8yhenjtsikjPK1F7W3HAMFo7vWFgj'
+  // };
+  // await updateWalletAccount(user_token_account, async (error, results) => {
+  //   if (error) {
+  //     res.status(500).send(error);
+  //   }
+  // });
+
 });
 
 

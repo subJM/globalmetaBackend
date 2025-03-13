@@ -3,7 +3,7 @@ var router = express.Router();
 const fs = require('fs');
 const path = require('path');
 
-// var { Web3 } = require('web3');
+var { Web3 } = require('web3');
 // const PROJECT_ID = process.env.PROJECT_ID;
 // const web3 = new Web3(`wss://eth-sepolia.g.alchemy.com/v2/${PROJECT_ID}`);
 require('dotenv').config();
@@ -11,6 +11,8 @@ require('dotenv').config();
 const hre = require("hardhat");
 
 const { insertDB, selectUserDB, loginDB, checkUser} = require('../mysql.js');
+
+const { encryptPrivateKey, decryptPrivateKey} = require("../util/crypto.js");
 
 /* GET users listing. */
 router.get('/', function(req, res, next) {
@@ -39,65 +41,66 @@ router.get('/account/create', function(req, res, next) {
 // };
 router.post('/account/signin', async function (req, res, next) {
   const user_id = req.body.user_id;
-
+  const email = req.body.email;
   try {
     // 유저 아이디 체크
-    const result = await checkUser(user_id);
-
+    const result = await checkUser(user_id , email);
     if (result.length > 0) {
+      console.log(JSON.stringify(result));
       // 아이디가 이미 존재하면 응답 후 종료
       return res.status(201).send('exist');
-    }
+    };
+    return res.status(201).send('success');
   } catch (error) {
     console.error('Error:', error);
     return res.status(500).send('Internal Server Error');
   }
+  // 이더와 LOTT 지갑 생성
+  // try {
+  //   await insertDB('users', req.body, async (error, results) => {
+  //     if (error) {
+  //       return res.status(500).send('서버 오류 발생');
+  //     } else {
+        // const account = hre.ethers.Wallet.createRandom();
 
-  try {
-    await insertDB('users', req.body, async (error, results) => {
-      if (error) {
-        return res.status(500).send('서버 오류 발생');
-      } else {
-        const account = hre.ethers.Wallet.createRandom();
+        // await makeKeyFile(user_id, account.address, 'address');
+        // await makeKeyFile(user_id, account.privateKey, 'privateKey');
 
-        await makeKeyFile(user_id, account.address, 'address');
-        await makeKeyFile(user_id, account.privateKey, 'privateKey');
+        // const user_account = {
+        //   user_srl: results.insertId,
+        //   wallet: 'ETH',
+        //   token_name: 'ETH',
+        //   address: account.address,
+        // };
 
-        const user_account = {
-          user_srl: results.insertId,
-          wallet: 'ETH',
-          token_name: 'ETH',
-          address: account.address,
-        };
+        // await insertDB('walletinfo', user_account, async (error, results) => {
+        //   if (error) {
+        //     console.log(error);
+        //     return res.status(500).send(error);
+        //   }
+        // });
 
-        await insertDB('walletinfo', user_account, async (error, results) => {
-          if (error) {
-            console.log(error);
-            return res.status(500).send(error);
-          }
-        });
+        // const user_lott_account = {
+        //   user_srl: results.insertId,
+        //   wallet: 'LOTT',
+        //   token_name: 'LOTT',
+        //   address: account.address,
+        // };
 
-        const user_lott_account = {
-          user_srl: results.insertId,
-          wallet: 'LOTT',
-          token_name: 'LOTT',
-          address: account.address,
-        };
-
-        await insertDB('walletinfo', user_lott_account, async (error, results) => {
-          if (error) {
-            console.log(error);
-            return res.status(500).send(error);
-          } else {
-            return res.status(201).send('success');
-          }
-        });
-      }
-    });
-  } catch (error) {
-    console.error('Error:', error);
-    return res.status(500).send('Internal Server Error');
-  }
+        // await insertDB('walletinfo', user_lott_account, async (error, results) => {
+        //   if (error) {
+        //     console.log(error);
+        //     return res.status(500).send(error);
+        //   } else {
+            // return res.status(201).send('success');
+        //   }
+        // });
+  //     }
+  //   });
+  // } catch (error) {
+  //   console.error('Error:', error);
+  //   return res.status(500).send('Internal Server Error');
+  // }
 });
 
 
@@ -120,8 +123,12 @@ router.post('/account/login', async function(req, res, next) {
 //이더 지갑주소 가져오기
 router.post('/getEthAddress' , async function (req, res) {
   const user_id = req.body.user_id;
-  const address = await fs.readFileSync(`./user/${user_id}/address`, 'utf8');
-   res.status(201).send(address);  
+  const token_name = req.body.token_name;
+  const key = decryptPrivateKey(req.body.key);
+  // const address = await fs.readFileSync(`./user/${user_id}/ETH/address`, 'utf8');
+  const web3 = new Web3();
+  
+  res.status(201).send(web3.eth.accounts.privateKeyToAddress(key));
 });
 
 
@@ -132,23 +139,23 @@ router.post('/getAddressBalance', async (req, res) => {
 });
 
 
-async function makeKeyFile(user_id,content,fileName){
-  const isExists = fs.existsSync(`/user/${user_id}`);
-  if(!isExists){
-    await fs.mkdir(`./user/${user_id}`, { recursive: true }, (err) =>{
-      console.error(err);
-      return;
-    });
-  }
-  fs.writeFile(`./user/${user_id}/${fileName}`, content, (err) => {
-      if (err) {
-          console.error('파일 쓰기 중 오류 발생:', err);
-          return;
-      }
-      console.log('파일이 성공적으로 생성되었습니다.');
-      return "SUCCESS";
-  });
-}
+// async function makeKeyFile(user_id,content,fileName){
+//   const isExists = fs.existsSync(`/user/${user_id}`);
+//   if(!isExists){
+//     await fs.mkdir(`./user/${user_id}`, { recursive: true }, (err) =>{
+//       console.error(err);
+//       return;
+//     });
+//   }
+//   fs.writeFile(`./user/${user_id}/${fileName}`, content, (err) => {
+//       if (err) {
+//           console.error('파일 쓰기 중 오류 발생:', err);
+//           return;
+//       }
+//       console.log('파일이 성공적으로 생성되었습니다.');
+//       return "SUCCESS";
+//   });
+// }
 
 
 //이더리움 잔고 가져오기

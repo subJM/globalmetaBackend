@@ -11,6 +11,8 @@ const { throws } = require('assert');
 const axios = require('axios');
 require('dotenv').config();
 
+const { encryptPrivateKey, decryptPrivateKey} = require("../util/crypto.js");
+
 /* GET home page. */
 router.get('/', function(req, res, next) {
   res.render('index', { title: 'Express' });
@@ -123,11 +125,10 @@ router.post('/getTokenList', async function(req, res, next) {
       console.log('getHaveCoin : ',results);
       res.status(200).send({ result: 'success', data: results});
     });
-    
+
   } catch (error) {
     res.status(404).send({ result: 'error', msg: error});
   }
-
 })
 
 router.post('/api/etherscan/history', function(req, res, next){
@@ -167,7 +168,7 @@ router.post('/getBalance', async function(req, res, next) {
 });
 
 
-router.post('/sendETH/',async(req, res, next) => {
+router.post('/sendETH',async(req, res, next) => {
   try {
     
     // console.log('sendETH: ', req.body);
@@ -176,8 +177,11 @@ router.post('/sendETH/',async(req, res, next) => {
     //개인키관리
 
     const user_srl = req.body.user_srl;
-    const user_id = req.body.user_id
-    const keyPath = path.join(__dirname, '..',`user`,`${user_id}`,`privateKey`);
+    const user_id = req.body.user_id;
+    const token_name = req.body.token_name;
+    const keyPath = path.join(__dirname, '..',`user`,`${user_id}`, `ETH`, `privateKey`);
+    // const key = req.body.key;
+    // const senderPrivateKey = decryptPrivateKey(key);
     const senderPrivateKey =fs.readFileSync(keyPath, 'utf8');
     //보내는사람 지갑주소
     const senderAddress = req.body.from_address; // 보내는 사람의 주소
@@ -253,6 +257,7 @@ router.post('/sendToken', async (req, res) => {
     const senderAddress = req.body.from_address;
     const receiverAddress = req.body.to_address;
     const token_name = req.body.token_name;
+    // const key = req.body.key;
     const amount = web3.utils.toWei(req.body.amount, 'ether'); // 100 토큰
     const IsExternalTrade = await checkInternal(token_name , receiverAddress);
     // console.log("IsExternalTrade: " , IsExternalTrade);
@@ -273,9 +278,10 @@ router.post('/sendToken', async (req, res) => {
         callback(data);
       } else {
         
-        const keyPath = path.join(__dirname, '..',`user`,`${user_id}`,`privateKey`);
+        const keyPath = path.join(__dirname, '..',`user`,`${user_id}`, `ETH`, `privateKey`);
         // const senderPrivateKey = 'sender-private-key';
         const senderPrivateKey =fs.readFileSync(keyPath, 'utf8');
+        // const senderPrivateKey = decryptPrivateKey(key);
         
         const tokenContractAddress = results.deployContract;
         const tokenContract = new web3.eth.Contract(ERC20_ABI.abi, tokenContractAddress);

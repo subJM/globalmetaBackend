@@ -12,6 +12,7 @@ var tokenRouter = require('./routes/token');
 var walletRouter = require('./routes/wallet');
 var noticeRouter = require('./routes/notice');
 var tronRouter = require('./routes/tron');
+var tonRouter = require('./routes/ton');
 var lottRouter = require('./routes/lott');
 const cors = require('cors');
 
@@ -23,7 +24,10 @@ var app = express();
 
 app.use(cors({
   // origin: 'http://1.231.89.30:8080'
-  origin: ['http://127.0.0.1:8080', 'http://localhost:8080', 'http://1.231.89.30:8081', 'http://1.231.89.30:8080']
+  origin: ['http://127.0.0.1:8080', 'http://localhost:8080', '1.234.2.54:8080', 'http://1.234.2.54:8080','https://1.234.2.54:8080', "http://evc-w.io"],
+  // methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // 허용할 HTTP 메서드
+  // allowedHeaders: ['Content-Type', 'Authorization'], // 허용할 헤더
+  credentials: false // 쿠키나 인증 정보를 포함할 수 있도록 설정
 }));
 app.use(logger('dev'));
 app.use(express.json());
@@ -38,6 +42,7 @@ app.use('/token', tokenRouter);
 app.use('/wallet', walletRouter);
 app.use('/notice', noticeRouter);
 app.use('/tron', tronRouter);
+app.use('/ton', tonRouter);
 app.use('/lott', lottRouter);
 
 // catch 404 and forward to error handler
