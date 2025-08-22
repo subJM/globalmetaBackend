@@ -174,7 +174,7 @@ router.post('/getAddressTokenBalance', async (req, res, next) => {
     const key = req.body.key;
 
     try {
-        const keyPath = path.join(__dirname, '..', `user`, `${user_id}`, `privateKey`);
+        const keyPath = path.join(__dirname, '..', `user`, `${user_id}`, `ETH`,`privateKey`);
         const senderPrivateKey = fs.readFileSync(keyPath, 'utf8').trim();
         // const senderPrivateKey = decryptPrivateKey(key);
 
