@@ -24,7 +24,7 @@ var app = express();
 
 app.use(cors({
   // origin: 'http://1.231.89.30:8080'
-  origin: ['http://127.0.0.1:8080', 'http://localhost:8080', '1.234.2.54:8080', 'http://1.234.2.54:8080', "http://evc-w.io"],
+  origin: ['http://127.0.0.1:8080', 'http://localhost:8080', '1.234.2.54:8080', 'http://1.234.2.54:8080', "http://evc-w.io", "http://211.45.175.111"],
   // origin: ['*'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // 허용할 HTTP 메서드
   // allowedHeaders: ['Content-Type', 'Authorization'], // 허용할 헤더
@@ -47,21 +47,18 @@ app.use('/tron', tronRouter);
 app.use('/ton', tonRouter);
 app.use('/lott', lottRouter);
 
-// catch 404 and forward to error handler
-app.use(function(req, res, next) {
+// 404
+app.use(function (req, res, next) {
   console.log(`Incoming request from: ${req.ip}, URL: ${req.url}`);
-  next(createError(404));
+  res.status(404).json({ error: 'Not Found', url: req.originalUrl });
 });
 
-// error handler
-app.use(function(err, req, res, next) {
-  // set locals, only providing error in development
-  res.locals.message = err.message;
-  res.locals.error = req.app.get('env') === 'development' ? err : {};
-
-  // render the error page
-  res.status(err.status || 500);
-  res.render('error');
+// Error handler
+app.use(function (err, req, res, next) {
+  console.error(err);
+  res.status(err.status || 500).json({
+    error: err.message || 'Server Error'
+  });
 });
 
 module.exports = app;
