@@ -136,7 +136,6 @@ router.post('/create_account', async function (req, res, next) {
     for (const data of walletData) {
       await insertDB('walletinfo', data);
     }
-
     // 성공 응답
     // res.status(201).send('success');
     res.status(201).send({result:"success", privateKey: account.privateKey});
@@ -170,7 +169,7 @@ router.post('/getAddressBalance', async function (req, res, next) {
 
 //이더계열 토큰
 router.post('/getAddressTokenBalance', async (req, res, next) => {
-    // const user_id = req.body.user_id;
+    const user_id = req.body.user_id;
     const address = req.body.address;
     const key = req.body.key;
 

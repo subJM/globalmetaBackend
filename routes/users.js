@@ -122,13 +122,27 @@ router.post('/account/login', async function(req, res, next) {
 
 //이더 지갑주소 가져오기
 router.post('/getEthAddress' , async function (req, res) {
-  const user_id = req.body.user_id;
-  const token_name = req.body.token_name;
-  const key = decryptPrivateKey(req.body.key);
+  // const user_id = req.body.user_id;
+  // const token_name = req.body.token_name;
+  // console.log(req.body);
+  // const key = decryptPrivateKey(req.body.key);
   // const address = await fs.readFileSync(`./user/${user_id}/ETH/address`, 'utf8');
-  const web3 = new Web3();
+  // const web3 = new Web3();
   
-  res.status(201).send(web3.eth.accounts.privateKeyToAddress(key));
+  // res.status(201).send(web3.eth.accounts.privateKeyToAddress(key));
+
+  try {
+    const user_id = req.body.user_id;
+    // 비동기 방식으로 파일 읽기
+    const address = fs.readFileSync(`./user/${user_id}/ETH/address`, 'utf8');
+    // const address = decryptPrivateKey(key);
+    res.status(201).send({ address: address });
+  } catch (error) {
+    console.error('Error reading address file:', error);
+    // 파일을 읽는 중 에러가 발생하면 500 상태 코드를 클라이언트로 전송
+    res.status(500).send({ result: 'error', message: 'Failed to read address file' });
+    // 또는 next(error)로 에러 처리 미들웨어로 전달
+  }
 });
 
 
