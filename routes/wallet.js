@@ -74,7 +74,7 @@ router.post("/updateWallet", async (req, res)=>{
 
 router.post("/getHistory", async (req, res)=>{
     const user_srl = req.body.user_srl;
-    const token_name = req.body.token_name;
+    const token_name = req.body.token_name.toLowerCase();
     const address = req.body.address;
     console.log(req.body);
     getHistory(user_srl , token_name , address, (error , result)=>{
