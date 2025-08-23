@@ -21,7 +21,6 @@ var app = express();
 // view engine setup
 // app.set('views', path.join(__dirname, 'views'));
 // app.set('view engine', 'jade');
-app.listen(3000, '127.0.0.1');
 app.use(cors({
   // origin: 'http://1.231.89.30:8080'
   origin: ['http://127.0.0.1:8080', 'http://localhost:8080', '1.234.2.54:8080', 'http://1.234.2.54:8080', "http://evc-w.io", "http://211.45.175.111", "https://lottwallet.org"],
