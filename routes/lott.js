@@ -199,7 +199,7 @@ router.post('/getAddressBalance', async function (req, res, next) {
 router.post('/getAddressTokenBalance', async (req, res, next) => {
     const user_id = req.body.user_id;
     const address = req.body.address;
-    console.log('getAddressTokenBalance: ',req.body);
+
     try {
       const keyPath = path.join(__dirname, '..', `user`, `${user_id}`, `ETH`,`privateKey`);
       const senderPrivateKey = fs.readFileSync(keyPath, 'utf8').trim();
@@ -605,6 +605,9 @@ async function makeKeyFile(user_id, content, fileName) {
         return res.status(200).send({ result:'block', message:'잠겨있어 전송할수 없습니다.' });
       }
 
+      const IsExternalTrade = await checkInternal(token_name , receiverAddress);
+
+
       // 개인키/지갑
       const privateKey = fs.readFileSync(`./user/${user_id}/ETH/privateKey`, 'utf8').trim();
       const wallet = new ethers.Wallet(privateKey, provider);
@@ -778,6 +781,27 @@ async function estimateEthereumFee(fromAddress, toAddress, amount, tokenName) {
       throw error;
   }
 }
+
+
+// 지갑주소 내부 외부 확인
+function checkInternal(token_name , to_address){
+  return new Promise((resolve, reject) => { // Promise를 반환합니다.
+    const checkForm = {
+      token_name: token_name,
+      to_address: to_address,
+    };
+
+    checkAddress(checkForm, (result) => {
+      console.log('res: ', result);
+      if (result.length > 0) {
+        resolve("true"); // 프로미스를 해결하고 "yes"를 반환합니다.
+      } else {
+        resolve("false"); // 프로미스를 해결하고 "no"를 반환합니다.
+      }
+    });
+  });
+}
+
 
 // 예제 실행
 // (async () => {
