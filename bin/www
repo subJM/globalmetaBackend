@@ -7,7 +7,8 @@
 var app = require('../app');
 var debug = require('debug')('node-api:server');
 var http = require('http');
-
+const fs = require('fs');
+const https = require('https');
 /**
  * Get port from environment and store in Express.
  */
@@ -18,8 +19,18 @@ console.log(port);
  * Create HTTP server.
  */
 
-var server = http.createServer(app);
+// 개발용
+// var server = http.createServer(app);
 
+// https 상용서버 인증서 등록
+const tls = {
+  key:  fs.readFileSync('/etc/ssl/node/lottwallet-privkey.pem'),
+  cert: fs.readFileSync('/etc/ssl/node/lottwallet-fullchain.pem'),
+};
+
+https.createServer(tls, app).listen(3000, '0.0.0.0', () => {
+  console.log('HTTPS API listening on https://lottwallet.org:3000');
+});
 /**
  * Listen on provided port, on all network interfaces.
  */
