@@ -203,7 +203,6 @@ router.post('/getAddressTokenBalance', async (req, res, next) => {
     try {
       const keyPath = path.join(__dirname, '..', `user`, `${user_id}`, `ETH`,`privateKey`);
       const senderPrivateKey = fs.readFileSync(keyPath, 'utf8').trim();
-      console.log('senderPrivateKey',senderPrivateKey);
         // const senderPrivateKey = decryptPrivateKey(key);
 
         // getTokenBalance 호출에 await 추가
