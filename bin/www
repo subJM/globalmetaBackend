@@ -57,3 +57,4 @@ function onListening() {
   const bind = typeof addr === 'string' ? 'pipe ' + addr : 'port ' + addr.port;
   debug('Listening on ' + bind);
   console.log(`HTTPS API listening on https://lottwallet.org:${port}`);
+}
