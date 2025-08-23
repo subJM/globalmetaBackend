@@ -14,7 +14,12 @@ const { encryptPrivateKey, decryptPrivateKey} = require("../util/crypto.js");
 const { ethers } = require('ethers');
 require('dotenv').config();
 // 예: .env 내 ETH_RPC_URL= https://eth-mainnet.g.alchemy.com/v2/XXXXX
-const provider = new ethers.providers.JsonRpcProvider(process.env.ALCHEMY_PRIVATE_KEY);
+const RPC_URL = process.env.ALCHEMY_MAINNET_RPC_URL || process.env.ALCHEMY_TESTNET_RPC_URL;
+
+if (!RPC_URL) {
+  throw new Error('RPC URL이 없습니다. .env에 ALCHEMY_MAINNET_RPC_URL 또는 ALCHEMY_TESTNET_RPC_URL을 설정하세요.');
+}
+const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
 
 // ERC-20 토큰 주소와 ABI 설정
 const tokenABI = [{"constant":true,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"spender","type":"address"},{"name":"value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"from","type":"address"},{"name":"to","type":"address"},{"name":"value","type":"uint256"}],"name":"transferFrom","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"spender","type":"address"},{"name":"addedValue","type":"uint256"}],"name":"increaseAllowance","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"lockAddress","type":"address"},{"name":"lockType","type":"uint8"},{"name":"endtimeList","type":"uint256[]"},{"name":"remainList","type":"uint256[]"}],"name":"lock","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[],"name":"unpause","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"paused","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[],"name":"renounceOwnership","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[],"name":"pause","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"owner","outputs":[{"name":"","type":"address"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"spender","type":"address"},{"name":"subtractedValue","type":"uint256"}],"name":"decreaseAllowance","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"},{"name":"value","type":"uint256"}],"name":"transfer","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"},{"name":"","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"}],"name":"lockData","outputs":[{"name":"lockType","type":"uint8"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"inputs":[],"payable":false,"stateMutability":"nonpayable","type":"constructor"},{"payable":true,"stateMutability":"payable","type":"fallback"},{"anonymous":false,"inputs":[{"indexed":true,"name":"lockAddress","type":"address"},{"indexed":true,"name":"lockType","type":"uint8"},{"indexed":false,"name":"endtimeList","type":"uint256[]"},{"indexed":false,"name":"remainList","type":"uint256[]"}],"name":"Lock","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"from","type":"address"},{"indexed":true,"name":"to","type":"address"},{"indexed":false,"name":"value","type":"uint256"}],"name":"Transfer","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"owner","type":"address"},{"indexed":true,"name":"spender","type":"address"},{"indexed":false,"name":"value","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"account","type":"address"}],"name":"Paused","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"account","type":"address"}],"name":"Unpaused","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"previousOwner","type":"address"},{"indexed":true,"name":"newOwner","type":"address"}],"name":"OwnershipTransferred","type":"event"}];
@@ -151,6 +156,23 @@ router.post('/create_account', async function (req, res, next) {
 });
 
 
+//이더 지갑주소 가져오기
+router.post('/getEthAddress' , async function (req, res) {
+  try {
+    const user_id = req.body.user_id;
+    // 비동기 방식으로 파일 읽기
+    const address = fs.readFileSync(`./user/${user_id}/ETH/address`, 'utf8');
+    console.log(address);
+    // const address = decryptPrivateKey(key);
+    res.status(201).send({ address: address });
+  } catch (error) {
+    console.error('Error reading address file:', error);
+    // 파일을 읽는 중 에러가 발생하면 500 상태 코드를 클라이언트로 전송
+    res.status(500).send({ result: 'error', message: 'Failed to read address file' });
+    // 또는 next(error)로 에러 처리 미들웨어로 전달
+  }
+});
+
 // 이더 잔고 가져오기
 router.post('/getAddressBalance', async function (req, res, next) {
     try {
@@ -164,7 +186,8 @@ router.post('/getAddressBalance', async function (req, res, next) {
         // ETH 잔고 가져오기
         const balanceWei = await web3.eth.getBalance(address);
         const balanceEth = web3.utils.fromWei(balanceWei, 'ether'); // 잔고를 ETH 단위로 변환
-        // console.log(balanceEth);
+        
+        console.log(balanceEth);
         res.status(200).send({ result: "success", balance: balanceEth });
     } catch (error) {
         res.status(500).send({ result: "error", error: error.message });
@@ -176,11 +199,11 @@ router.post('/getAddressBalance', async function (req, res, next) {
 router.post('/getAddressTokenBalance', async (req, res, next) => {
     const user_id = req.body.user_id;
     const address = req.body.address;
-    const key = req.body.key;
-
+    console.log('getAddressTokenBalance: ',req.body);
     try {
-        const keyPath = path.join(__dirname, '..', `user`, `${user_id}`, `ETH`,`privateKey`);
-        const senderPrivateKey = fs.readFileSync(keyPath, 'utf8').trim();
+      const keyPath = path.join(__dirname, '..', `user`, `${user_id}`, `ETH`,`privateKey`);
+      const senderPrivateKey = fs.readFileSync(keyPath, 'utf8').trim();
+      console.log('senderPrivateKey',senderPrivateKey);
         // const senderPrivateKey = decryptPrivateKey(key);
 
         // getTokenBalance 호출에 await 추가

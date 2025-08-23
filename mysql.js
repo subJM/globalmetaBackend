@@ -158,6 +158,12 @@ const getWalletBalance = async (user_srl, callback) => {
         callback(error, results);
     });
 };
+const getUserWallet = async (user_srl, callback) => {
+    const query = `SELECT * FROM globalmeta.walletinfo WHERE user_srl = ?`;
+    pool.query(query, [user_srl], (error, results) => {
+        callback(error, results);
+    });
+};
 
 const checkAddress = async (checkForm, callback) => {
     let query = `SELECT * FROM globalmeta.walletinfo WHERE token_name = ? `;
@@ -198,7 +204,6 @@ const updateWallet = async (user_srl, token_name, balance, callback) => {
 };
 
 const updateWalletAccount = async (data ,callback) => {
-
     const query = `UPDATE globalmeta.walletinfo SET address = ? WHERE user_srl = ? and token_name = ? `;
     pool.query(query, [data.address, data.user_srl, data.token_name], (error, results) => {
         callback(error, results);
@@ -357,4 +362,5 @@ module.exports = {
     historyDelete,
     checkUser,
     updateWalletAccount,
+    getUserWallet,
 };

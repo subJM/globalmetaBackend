@@ -1148,17 +1148,17 @@ async function expectEnergy(user_id, address, to_address, amount, coin_name) {
       const resources = await tronWeb.trx.getAccountResources(address);
       console.log("Account Resources:", resources);
 
-// 기본값을 설정하여 NaN 방지
-const availableEnergy = (resources.TotalEnergyLimit || 0) - (resources.TotalEnergyWeight || 0);
+      // 기본값을 설정하여 NaN 방지
+      const availableEnergy = (resources.TotalEnergyLimit || 0) - (resources.TotalEnergyWeight || 0);
 
-const energyDeficit = Math.max(0, estimatedEnergy - availableEnergy);
-const trxCost = energyDeficit > 0 ? (energyDeficit / 280).toFixed(6) : 0;
-console.log("Energy Calculation Result:", {
-  estimatedEnergy: estimatedEnergy,
-  availableEnergy: availableEnergy,
-  energyDeficit: energyDeficit,
-  trxCost: trxCost,
-});
+      const energyDeficit = Math.max(0, estimatedEnergy - availableEnergy);
+      const trxCost = energyDeficit > 0 ? (energyDeficit / 280).toFixed(6) : 0;
+      console.log("Energy Calculation Result:", {
+        estimatedEnergy: estimatedEnergy,
+        availableEnergy: availableEnergy,
+        energyDeficit: energyDeficit,
+        trxCost: trxCost,
+      });
 
       return {
         estimatedEnergy: estimatedEnergy,

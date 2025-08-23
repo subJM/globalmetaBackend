@@ -122,20 +122,13 @@ router.post('/account/login', async function(req, res, next) {
 
 //이더 지갑주소 가져오기
 router.post('/getEthAddress' , async function (req, res) {
-  // const user_id = req.body.user_id;
-  // const token_name = req.body.token_name;
-  // console.log(req.body);
-  // const key = decryptPrivateKey(req.body.key);
-  // const address = await fs.readFileSync(`./user/${user_id}/ETH/address`, 'utf8');
-  // const web3 = new Web3();
-  
-  // res.status(201).send(web3.eth.accounts.privateKeyToAddress(key));
-
   try {
     const user_id = req.body.user_id;
+    console.log(user_id);
     // 비동기 방식으로 파일 읽기
     const address = fs.readFileSync(`./user/${user_id}/ETH/address`, 'utf8');
     // const address = decryptPrivateKey(key);
+    console.log(address);
     res.status(201).send({ address: address });
   } catch (error) {
     console.error('Error reading address file:', error);

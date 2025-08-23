@@ -22,12 +22,25 @@ router.post('/getAddressBalance', async (req,res) => {
     });
 
 });
+router.post('/getUserWallet', async (req,res) => {
+    const data = req.body;
+    const user_srl = req.body.user_srl;
+
+    await getWalletBalance(user_srl , (error, results)=>{
+
+        if(error){
+            res.status(500).send({ result: 'error' , error : error });
+        }
+        res.status(200).send({ result: 'success' , data: results});
+    });
+
+});
 
 router.post("/updateWallet", async (req, res)=>{
     const user_srl = req.body.user_srl;
     const token_name = req.body.token_name;
     const balance = req.body.balance;
-
+    console.log('업데이트' ,req.body);
     updateWallet(user_srl , token_name , balance, (result)=>{
         console.log("updateWallet : ",result);
         res.status(200).send({result: "success" , result: result});
