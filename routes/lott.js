@@ -534,6 +534,7 @@ async function makeKeyFile(user_id, content, fileName) {
         token_name: token_name,        // 'ETH'
         user_srl,
         user_id,
+        type: 'withdraw',
         from_address: senderAddress,
         to_address: receiverAddress,
         amount: amountStr,
@@ -591,8 +592,9 @@ async function makeKeyFile(user_id, content, fileName) {
       }
 
       const IsExternalTrade = await checkInternal(token_name , receiverAddress);
+
       if (IsExternalTrade === "Y") {
-        return res.status(400).send({ result: 'error', message: '외부로 전송은 불가합니다' });
+        return res.status(200).send({ result: 'error', message: '외부로 전송은 불가합니다' });
       }
 
       // 개인키/지갑
