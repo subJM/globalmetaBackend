@@ -165,24 +165,44 @@ const getUserWallet = async (user_srl, callback) => {
     });
 };
 
-const checkAddress = async (checkForm, callback) => {
-    let query = `SELECT * FROM globalmeta.walletinfo WHERE token_name = ? `;
-    let queryParams = [checkForm.token_name];  // Always include token_name first
-    // Conditionally add additional filters to the query and parameters
+const checkAddress = (checkForm, callback) => {
+  let query = `SELECT * FROM globalmeta.walletinfo WHERE token_name = ? `;
+  const queryParams = [checkForm.token_name];
+
+  if (checkForm.to_address) {
+    // 주소 대소문자 이슈 방지 (DB/입력 모두 소문자로 맞추기 권장)
+    query += `AND LOWER(address) = LOWER(?) `;
+    queryParams.push(checkForm.to_address);
+  }
+  if (checkForm.user_srl) {
+    query += `AND user_srl = ? `;
+    queryParams.push(checkForm.user_srl);
+  }
+
+  pool.query(query, queryParams, (error, results) => {
+    callback(error, results);  // (err, results) 순서 고정
+  });
+};
+
+const checkAddressAsync = (checkForm) =>
+  new Promise((resolve, reject) => {
+    let query = `SELECT 1 FROM globalmeta.walletinfo WHERE token_name = ? `;
+    const params = [checkForm.token_name];
+
     if (checkForm.to_address) {
-        query += `AND address = ? `;
-        queryParams.push(checkForm.to_address);
+      query += `AND LOWER(address) = LOWER(?) `;
+      params.push(checkForm.to_address);
     }
     if (checkForm.user_srl) {
-        query += `AND user_srl = ? `;
-        queryParams.push(checkForm.user_srl);
+      query += `AND user_srl = ? `;
+      params.push(checkForm.user_srl);
     }
 
-    // Execute the query
-    pool.query(query, queryParams, (error, results) => {
-        callback(error, results);
+    pool.query(query, params, (err, rows) => {
+      if (err) return reject(err);
+      resolve(rows || []);
     });
-};
+  });
 
 const updateWalletInfo = async (sign, user_srl, token_name, amount, callback) => {
     const type = sign === "plus" ? "+" : "-";
@@ -268,8 +288,7 @@ const getAddressSendHistory = async (data, callback) => {
         FROM globalmeta.${data.coin_name}_history
         WHERE user_srl = ? 
             AND user_id = ?
-            AND from_address = ?
-            AND type = ?
+            AND (from_address = ? or to_address = ?)
         ORDER BY create_at DESC
         LIMIT ?;
     `;
@@ -277,7 +296,7 @@ const getAddressSendHistory = async (data, callback) => {
     // 쿼리 실행
     pool.query(
         query,
-        [data.user_srl, data.user_id, data.address, data.type ,data.limit || 5], // 리미트 기본값을 5로 설정
+        [data.user_srl, data.user_id, data.address, data.address, data.limit || 5], // 리미트 기본값을 5로 설정
         (error, results) => {
             if (error) {
                 console.error("Database Query Error:", error);
@@ -349,6 +368,7 @@ module.exports = {
     getTokenList,
     getWalletBalance,
     checkAddress,
+    checkAddressAsync,
     updateWalletInfo,
     updateWallet,
     getHistory,

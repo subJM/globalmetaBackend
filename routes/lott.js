@@ -7,7 +7,7 @@ require('dotenv').config();
 const {Web3} = require('web3');
 const hre = require("hardhat");
 // import Web3 from 'web3';
-const {getAddressSendHistory, checkUser ,insertDB } = require('../mysql');
+const {getAddressSendHistory, checkUser, insertDB, checkAddressAsync } = require('../mysql');
 
 const { encryptPrivateKey, decryptPrivateKey} = require("../util/crypto.js");
 
@@ -440,21 +440,6 @@ router.post('/getAddressSendHistory', async function (req, res) {
     }
 });
 
-//send 페이지 보낸기록 5개 가져오기
-router.post('/getAddressSendHistory', async function (req, res) {
-  try {
-    getAddressSendHistory(req.body ,async (error, results) => {
-      if(error){
-        throw error;
-      }
-      res.status(200).send({ result: 'success', data: results});
-    });
-  } catch (error) {
-    console.error("Error checking getAddressSendHistory transaction status:", error);
-    return { status: "error", error: error.message };
-  }
-});
-
 async function makeKeyFile(user_id, content, fileName) {
   // 디렉토리 존재 확인
   const dirPath = `./user/${user_id}/ETH`;
@@ -606,7 +591,9 @@ async function makeKeyFile(user_id, content, fileName) {
       }
 
       const IsExternalTrade = await checkInternal(token_name , receiverAddress);
-
+      if (IsExternalTrade === "Y") {
+        return res.status(400).send({ result: 'error', message: '외부로 전송은 불가합니다' });
+      }
 
       // 개인키/지갑
       const privateKey = fs.readFileSync(`./user/${user_id}/ETH/privateKey`, 'utf8').trim();
@@ -670,11 +657,12 @@ async function makeKeyFile(user_id, content, fileName) {
         token_name,
         user_srl,
         user_id,
+        type: 'withdraw',
         from_address: senderAddress,
         to_address: receiverAddress,
         amount: amountStr,
         usedFee: usedFeeEth,                // ETH 가스비
-        IsExternalTrade: 'true',
+        IsExternalTrade: IsExternalTrade,
         transactionHash: receipt.transactionHash,
         token_address
       };
@@ -783,23 +771,10 @@ async function estimateEthereumFee(fromAddress, toAddress, amount, tokenName) {
 }
 
 
-// 지갑주소 내부 외부 확인
-function checkInternal(token_name , to_address){
-  return new Promise((resolve, reject) => { // Promise를 반환합니다.
-    const checkForm = {
-      token_name: token_name,
-      to_address: to_address,
-    };
-
-    checkAddress(checkForm, (result) => {
-      console.log('res: ', result);
-      if (result.length > 0) {
-        resolve("true"); // 프로미스를 해결하고 "yes"를 반환합니다.
-      } else {
-        resolve("false"); // 프로미스를 해결하고 "no"를 반환합니다.
-      }
-    });
-  });
+// 지갑주소 내부 외부 확인 
+async function checkInternal(token_name, to_address) {
+  const rows = await checkAddressAsync({ token_name, to_address });
+  return rows.length > 0 ? "N" : "Y"; // N 내부 지갑(전송 허용), Y 외부(전송 불가)
 }
 
 
