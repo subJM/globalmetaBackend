@@ -6,4 +6,7 @@ router.get('/', (req, res) => {
   res.json({ ok: true, service: 'crypto-api' });
 });
 
+router.get('/health', (req, res) => res.send('ok'));
+
+
 module.exports = router;
