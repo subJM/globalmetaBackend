@@ -567,6 +567,112 @@ async function makeKeyFile(user_id, content, fileName) {
    * ERC-20 전송
    * body: { user_id, user_srl, email, token_name, token_address, from_address, to_address, amount }
    */
+
+    const { sendPrivateErc20Transfer } = require('./privateTx'); // 경로 맞게
+
+  const PRIVATE_TX_RPC_URL = process.env.PRIVATE_TX_RPC_URL || '';
+  const FLASHBOTS_AUTH_PRIVATE_KEY = process.env.FLASHBOTS_AUTH_PRIVATE_KEY || '';
+  
+   router.post('/transferToken_private', async function (req, res) {
+    const user_id        = req.body.user_id;
+    const user_srl       = req.body.user_srl;
+    const email          = req.body.email;
+    const token_name     = (req.body.token_name || 'TOKEN').toUpperCase();
+    const token_address  = req.body.token_address;   // ★필수
+    const senderAddress  = req.body.from_address;
+    const receiverAddress= req.body.to_address;
+    const amountStr      = String(req.body.amount ?? '0');
+
+    if (!user_id || !user_srl || !token_name || !senderAddress || !receiverAddress ||
+        !token_address || !ethers.utils.isAddress(token_address) ||
+        !amountStr || isNaN(Number(amountStr)) || Number(amountStr) <= 0) {
+      return res.status(400).send({ result:'error', message:'Invalid input parameters' });
+    }
+
+    try {
+        const privateKey = fs.readFileSync(`./user/${user_id}/ETH/privateKey`, 'utf8').trim();
+        const wallet = new ethers.Wallet(privateKey, provider);
+
+        // (중략) decimals/symbol/balance 체크 동일
+        const erc20Abi = [
+          'function transfer(address to, uint256 value) returns (bool)',
+          'function decimals() view returns (uint8)',
+          'function symbol() view returns (string)',
+          'function balanceOf(address owner) view returns (uint256)'
+        ];
+        const contract = new ethers.Contract(token_address, erc20Abi, provider);
+        const [decimals, symbol] = await Promise.all([
+          contract.decimals().catch(() => 18),
+          contract.symbol().catch(() => token_name)
+        ]);
+        const amountUnits = ethers.utils.parseUnits(amountStr, decimals);
+
+        const bal = await contract.balanceOf(wallet.address);
+        if (bal.lt(amountUnits)) {
+          return res.status(400).send({ result:'error', message:`잔고 부족: 보유 ${ethers.utils.formatUnits(bal, decimals)} ${symbol}` });
+        }
+
+        // === 여기가 핵심: 비공개 전송 ===
+        if (!PRIVATE_TX_RPC_URL) {
+          return res.status(500).send({ result:'error', message:'PRIVATE_TX_RPC_URL 미설정(비공개 전송 릴레이 URL 필요)' });
+        }
+
+        // 가스(ETH)가 "0"인 주소라면 —> 이 방식은 실패합니다.
+        // 그 경우에는 "가스충전Tx + 토큰전송Tx"를 같은 블록 번들로 넣는 별도 엔드포인트가 필요(아래 참고).
+        const ethBal = await provider.getBalance(wallet.address);
+        if (ethBal.isZero()) {
+          return res.status(400).send({
+            result:'error',
+            message:'이 주소의 ETH(가스)가 0 입니다. 번들 방식(가스충전+전송 동시)으로 처리해야 합니다.'
+          });
+        }
+
+        const { hash, sentVia } = await sendPrivateErc20Transfer({
+          provider,
+          relayUrl: PRIVATE_TX_RPC_URL,
+          authKey: FLASHBOTS_AUTH_PRIVATE_KEY,
+          wallet,
+          tokenAddress: token_address,
+          to: receiverAddress,
+          amountUnits,
+          gasLimitHint: '100000'
+        });
+
+        // 비공개 전송은 일반적으로 즉시 확정 hash를 주지만, 블록 포함은 약간 후에 됩니다.
+        // 필요하면 provider.waitForTransaction(hash)로 “포함 대기”를 넣되, 절대 공개 RPC로 재브로드캐스트하지 마세요.
+        // (일부 릴레이는 포함 전까지 조회가 안 될 수 있음)
+
+        // 기록 저장 (hash만 먼저 저장)
+        insertDB(`${token_name}_history`, {
+          token_name,
+          user_srl,
+          user_id,
+          type: 'withdraw',
+          from_address: senderAddress,
+          to_address: receiverAddress,
+          amount: amountStr,
+          usedFee: null, // 포함 후 영수증으로 업데이트
+          IsExternalTrade: IsExternalTrade,
+          transactionHash: hash,
+          token_address
+        }, (error) => {
+          if (error) {
+            console.error('Database insert error:', error);
+            return res.status(500).send({ result:'error', message:'Failed to save transaction history' });
+          }
+          res.status(200).send({
+            result:'pending',
+            message:`Private Tx 전송됨 (${sentVia}). 블록 포함 대기 중.`,
+            transaction: { hash, token: { address: token_address, symbol, decimals } }
+          });
+        });
+
+      } catch (err) {
+        console.error('Private Tx Error:', err?.response?.data || err?.message || err);
+        res.status(500).send({ result:'error', message: err?.message || 'Failed to transfer token (private)' });
+      }
+  });
+
   router.post('/transferToken', async function (req, res) {
     const user_id        = req.body.user_id;
     const user_srl       = req.body.user_srl;
