@@ -14,6 +14,7 @@ var noticeRouter = require('./routes/notice');
 var tronRouter = require('./routes/tron');
 var tonRouter = require('./routes/ton');
 var lottRouter = require('./routes/lott');
+var lottPrRouter = require('./routes/lott_pr');
 const cors = require('cors');
 
 var app = express();
@@ -45,6 +46,7 @@ app.use('/notice', noticeRouter);
 app.use('/tron', tronRouter);
 app.use('/ton', tonRouter);
 app.use('/lott', lottRouter);
+app.use('/lott_pr', lottPrRouter);
 
 // 404
 app.use(function (req, res, next) {
