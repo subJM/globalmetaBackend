@@ -4,7 +4,7 @@ const router = express.Router();
 const fs = require('fs');
 require('dotenv').config();
 const { ethers } = require('ethers');
-const { rescueBundle } = require('../services/rescueBundle');
+const { rescueBundle } = require('./privateTx');;
 
 const RPC_URL = process.env.ALCHEMY_MAINNET_RPC_URL;
 const RELAY_URL = process.env.FLASHBOTS_RELAY_URL || 'https://relay.flashbots.net';
