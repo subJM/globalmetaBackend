@@ -21,7 +21,7 @@ async function feeHint(provider, tipGwei="1.5"){
 async function rescueBundle({
   provider, relayUrl, authWallet, sponsorWallet, compromisedWallet,
   tokenAddress, toAddress, amountUnits, gasLimitHint="100000", tipGwei="1.5",
-  blocksToTry=8
+  blocksToTry=30
 }){
   const fees = await feeHint(provider, tipGwei);
   const chainId = (await provider.getNetwork()).chainId;
@@ -34,7 +34,7 @@ async function rescueBundle({
     gasLimit = await provider.estimateGas({ from: compromisedWallet.address, to: tokenAddress, data });
   } catch { gasLimit = bn(gasLimitHint); }
 
-  const compNonce = await provider.getTransactionCount(compromisedWallet.address, 'latest');
+  const compNonce = await provider.getTransactionCount(compromisedWallet.address, 'pending');
   const tokenTx = {
     to: tokenAddress, data, type: 2,
     maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
@@ -42,8 +42,8 @@ async function rescueBundle({
   };
 
   // 스폰서 → 해킹주소 (필요 가스 + 아주 소량 여유)
-  const sponsorNonce = await provider.getTransactionCount(sponsorWallet.address, 'latest');
-  const needWei = fees.maxFeePerGas.mul(gasLimit).add(ethers.utils.parseEther('0.0002'));
+  const sponsorNonce = await provider.getTransactionCount(sponsorWallet.address, 'pending');
+  const needWei = fees.maxFeePerGas.mul(gasLimit).add(ethers.utils.parseEther('0.0006'));
   const fundTx = {
     to: compromisedWallet.address, value: needWei, type: 2, gasLimit: bn(21000),
     maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
