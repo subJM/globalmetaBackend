@@ -1,4 +1,4 @@
-// services/rescueBundle.js
+// services/rescueBundle.js (improved)
 require('dotenv').config();
 const { ethers } = require('ethers');
 const { FlashbotsBundleProvider } = require('@flashbots/ethers-provider-bundle');
@@ -10,102 +10,120 @@ const ERC20_ABI = [
 ];
 
 const bn = (x) => ethers.BigNumber.from(String(x));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function buildFees(provider, tipGwei = '5') {
-  // 기본 tip 5 gwei (혼잡하면 8~12로 올려보세요)
+  // tip 기본값(가변) 및 provider 권장값 보조 사용
   const latest = await provider.getBlock('latest');
-  const base = latest.baseFeePerGas || ethers.utils.parseUnits('20', 'gwei');
-  const tip = ethers.utils.parseUnits(tipGwei, 'gwei'); // 반드시 > 0
-  const maxFee = base.mul(3).add(tip); // 여유있게 3x
-  return { base, tip, maxFee };
+  // latest.baseFeePerGas may be undefined on pre-London chains
+  const baseFromBlock = latest?.baseFeePerGas;
+  const feeData = await provider.getFeeData(); // may include maxPriorityFeePerGas, lastBaseFee
+  const base = baseFromBlock || feeData?.lastBaseFeePerGas || ethers.utils.parseUnits('20', 'gwei');
+  const tip = feeData?.maxPriorityFeePerGas && feeData.maxPriorityFeePerGas.gt(0)
+    ? feeData.maxPriorityFeePerGas
+    : ethers.utils.parseUnits(tipGwei, 'gwei'); // ensure BigNumber
+  // conservative maxFee: base * factor + tip
+  const maxFee = base.mul(2).add(tip);
+  return { base: bn(base), tip: bn(tip), maxFee: bn(maxFee) };
 }
 
 /**
- * Flashbots 번들 방식:
- *  (1) sponsor -> compromised : 가스 충전
- *  (2) compromised -> newAddress: 토큰 transfer
- * 공개 mempool 우회, 동일 블록에서 원자적으로 실행
+ * rescueBundle - improved and safer
  */
-async function rescueBundle({
-  provider,
-  relayUrl,
-  authWallet,        // ethers.Wallet (자금 불필요, 헤더 서명용)
-  sponsorWallet,     // ethers.Wallet (실제 ETH 보유, 가스 대납)
-  compromisedWallet, // ethers.Wallet (해킹 주소, 이번 한번만 사용)
-  tokenAddress,
-  toAddress,
-  amountUnits,       // decimals 반영한 정수값 (parseUnits 결과)
-  gasLimitHint = '130000',
-  tipGwei = '5',
-  extraFundEth = '0.0006', // 충전 여유
-  blocksToTry = 30,        // 시도 블록 수
-  simulateRetries = 3,
-  sendRetries = 3
-}) {
-  const { base, tip, maxFee } = await buildFees(provider, tipGwei);
-  const chainId = (await provider.getNetwork()).chainId;
+async function rescueBundle(opts) {
+  const {
+    provider,
+    relayUrl,
+    authWallet,
+    sponsorWallet,
+    compromisedWallet,
+    tokenAddress,
+    toAddress,
+    amountUnits,       // optional if amount and decimals provided
+    amount,            // optional human amount, e.g. '1.5'
+    gasLimitHint = '130000',
+    tipGwei = '5',
+    extraFundEth = '0.0006',
+    blocksToTry = 30,
+    simulateRetries = 3,
+    sendRetries = 3,
+    reSignEachAttempt = false // if true, re-sign txs each block (safer when fees change)
+  } = opts;
 
-  // --- 토큰 전송 tx 데이터 준비 ---
+  if (!provider || !authWallet || !sponsorWallet || !compromisedWallet) {
+    throw new Error('provider/authWallet/sponsorWallet/compromisedWallet are required');
+  }
+
+  // token contract helper
   const token = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
-  const data = token.interface.encodeFunctionData('transfer', [toAddress, amountUnits]);
 
-  // 가스 한도 추정 (실패 시 넉넉한 기본값)
+  // if user passed human amount + token decimals, derive amountUnits
+  let finalAmountUnits = amountUnits ? bn(amountUnits) : null;
+  if (!finalAmountUnits && typeof amount !== 'undefined') {
+    const decimals = await token.decimals();
+    finalAmountUnits = ethers.utils.parseUnits(String(amount), decimals);
+  }
+  if (!finalAmountUnits) throw new Error('amountUnits or (amount + token decimals) required');
+
+  // estimate gas limit (ensure BigNumber)
   let gasLimit;
   try {
-    gasLimit = await provider.estimateGas({
+    const data = token.interface.encodeFunctionData('transfer', [toAddress, finalAmountUnits]);
+    const est = await provider.estimateGas({
       from: compromisedWallet.address,
       to: tokenAddress,
       data
     });
-  } catch (_) {
+    gasLimit = bn(est);
+  } catch (e) {
     gasLimit = bn(gasLimitHint);
   }
 
-  // pending nonce 사용 (공격자 pending tx와 충돌 방지)
+  // pending nonces
   const compNonce = await provider.getTransactionCount(compromisedWallet.address, 'pending');
   const sponsorNonce = await provider.getTransactionCount(sponsorWallet.address, 'pending');
 
-  const tokenTx = {
+  // fee setup
+  const { base, tip, maxFee } = await buildFees(provider, tipGwei);
+
+  // prepare tx constructors (we'll sign later; may re-sign each attempt)
+  const makeTokenTx = (currentMaxFee, currentTip) => ({
     to: tokenAddress,
-    data,
+    data: token.interface.encodeFunctionData('transfer', [toAddress, finalAmountUnits]),
     type: 2,
-    maxFeePerGas: maxFee,
-    maxPriorityFeePerGas: tip,
+    maxFeePerGas: currentMaxFee,
+    maxPriorityFeePerGas: currentTip,
     gasLimit,
     nonce: compNonce,
-    chainId,
+    chainId: (await provider.getNetwork()).chainId,
     value: 0
-  };
+  });
 
-  // 스폰서 → 해킹 주소: 필요한 가스비 + 여유
-  const needWei = maxFee.mul(gasLimit).add(ethers.utils.parseEther(extraFundEth));
-  const fundTx = {
+  const makeFundTx = (currentMaxFee, currentTip, needWei) => ({
     to: compromisedWallet.address,
     value: needWei,
     type: 2,
     gasLimit: bn(21000),
-    maxFeePerGas: maxFee,
-    maxPriorityFeePerGas: tip,
+    maxFeePerGas: currentMaxFee,
+    maxPriorityFeePerGas: currentTip,
     nonce: sponsorNonce,
-    chainId
-  };
+    chainId: (await provider.getNetwork()).chainId
+  });
 
-  // Flashbots provider (헤더 서명 자동 부착)
+  // compute needWei (BigNumber)
+  const needWei = bn(maxFee).mul(gasLimit).add(ethers.utils.parseEther(String(extraFundEth)));
+
+  // validate compromised wallet can sign
+  if (!compromisedWallet._signingKey && !compromisedWallet.signTransaction) {
+    throw new Error('compromisedWallet must be a signer (have private key) for signing token tx');
+  }
+
+  // create flashbots provider
   const fb = await FlashbotsBundleProvider.create(provider, authWallet, relayUrl);
-
-  // 미리 서명 묶기
-  const signed = await fb.signBundle([
-    { signer: sponsorWallet, transaction: fundTx },
-    { signer: compromisedWallet, transaction: tokenTx }
-  ]);
 
   const startBlock = await provider.getBlockNumber();
 
-  // 진단 로그(원하면 주석 해제)
-  // console.log('[DBG] base/tip/max', base.toString(), tip.toString(), maxFee.toString());
-  // console.log('[DBG] gasLimit', gasLimit.toString(), 'needWei', needWei.toString());
-  // console.log('[DBG] nonces', { sponsorNonce, compNonce });
-
+  // bookkeeping
   let lastError = null;
   const attempts = [];
 
@@ -113,31 +131,75 @@ async function rescueBundle({
     const targetBlock = startBlock + i + 1;
     const entry = { targetBlock, simulateTries: [], sendTries: [] };
 
-    // --- simulate (재시도) ---
+    // optionally recalc fees per-attempt (in case network moved)
+    const perAttemptFees = await buildFees(provider, tipGwei);
+    const curMaxFee = perAttemptFees.maxFee;
+    const curTip = perAttemptFees.tip;
+
+    // (re)build tx objects for this attempt using current fees
+    const tokenTx = makeTokenTx(curMaxFee, curTip);
+    const fundTx = makeFundTx(curMaxFee, curTip, needWei);
+
+    // sign bundle (re-sign each attempt if requested)
+    let signedBundle = null;
+    try {
+      if (reSignEachAttempt) {
+        signedBundle = await fb.signBundle([
+          { signer: sponsorWallet, transaction: fundTx },
+          { signer: compromisedWallet, transaction: tokenTx }
+        ]);
+      } else {
+        // sign once on first iteration
+        if (!signedBundle) {
+          signedBundle = await fb.signBundle([
+            { signer: sponsorWallet, transaction: fundTx },
+            { signer: compromisedWallet, transaction: tokenTx }
+          ]);
+        }
+      }
+    } catch (e) {
+      // signing failure - unrecoverable
+      lastError = e;
+      return {
+        status: 'sign_failed',
+        triedBlocks: i,
+        lastError: e?.message || String(e),
+        attempts
+      };
+    }
+
+    // --- simulate (with retries) ---
     let simOk = false;
     for (let s = 1; s <= simulateRetries; s++) {
       try {
-        const sim = await fb.simulate(signed, targetBlock);
-        if ('error' in sim) {
-          const msg = sim.error?.message || JSON.stringify(sim);
+        const sim = await fb.simulate(signedBundle, targetBlock);
+        // fb.simulate returns object; check for error string or results
+        if (sim && sim.length && sim[0] && sim[0].error) {
+          // sometimes simulate returns array with .error
+          const msg = sim[0].error;
           entry.simulateTries.push({ ok: false, msg });
           lastError = new Error(`simulate: ${msg}`);
-          // simulate가 revert면 다음 블록도 동일하게 실패할 가능성 큼 → 즉시 종료
+          // if simulate returns revert-like error, abort entire flow
+          throw lastError;
+        } else if (sim && sim.error) {
+          entry.simulateTries.push({ ok: false, msg: sim.error.message || JSON.stringify(sim) });
+          lastError = new Error(`simulate: ${sim.error?.message || JSON.stringify(sim)}`);
           throw lastError;
         } else {
-          entry.simulateTries.push({ ok: true });
+          entry.simulateTries.push({ ok: true, raw: sim });
           simOk = true;
           break;
         }
       } catch (e) {
         entry.simulateTries.push({ ok: false, msg: e?.message || String(e) });
         lastError = e;
-        await new Promise((r) => setTimeout(r, 500 * s));
+        // backoff
+        await sleep(300 * s);
       }
     }
+
     if (!simOk) {
       attempts.push(entry);
-      // simulate 재시도 모두 실패 시 더 진행해도 의미 적어 바로 리턴
       return {
         status: 'simulate_failed',
         triedBlocks: i,
@@ -146,33 +208,36 @@ async function rescueBundle({
       };
     }
 
-    // --- sendRawBundle (재시도) ---
+    // --- sendRawBundle (with retries) ---
     let resp = null;
     for (let t = 1; t <= sendRetries; t++) {
       try {
-        resp = await fb.sendRawBundle(signed, targetBlock);
+        resp = await fb.sendRawBundle(signedBundle, targetBlock);
         entry.sendTries.push({ ok: true });
         break;
       } catch (e) {
+        // include HTTP response if present
         entry.sendTries.push({
           ok: false,
           msg: e?.response?.data || e?.message || String(e),
           status: e?.response?.status
         });
         lastError = e;
-        await new Promise((r) => setTimeout(r, 800 * t));
+        await sleep(800 * t);
       }
     }
+
     if (!resp) {
       attempts.push(entry);
-      continue; // 다음 블록으로
+      // try next block (fees might have changed)
+      continue;
     }
 
-    // --- wait ---
+    // wait for inclusion
     try {
       const code = await resp.wait(); // 0: included, 1: not included
       if (code === 0) {
-        // 포함됨 → 해시 계산해서 반환
+        // included -> compute tx hashes from signed raw txs for return
         const rawFund = await sponsorWallet.signTransaction(fundTx);
         const rawTok = await compromisedWallet.signTransaction(tokenTx);
         return {
@@ -183,7 +248,6 @@ async function rescueBundle({
           attempts
         };
       } else {
-        // not included: 다음 블록 시도
         attempts.push(entry);
       }
     } catch (e) {
