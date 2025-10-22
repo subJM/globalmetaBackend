@@ -176,6 +176,23 @@ async function rescueBundle({
       };
     }
 
+    // (루프 직전, 딱 한 번) 스폰서 잔액 체크 추가
+    const sponsorBal = await provider.getBalance(sponsorWallet.address);
+    const fundTxCostCeil = bn(21000).mul(maxFee); // 스폰서 자기 가스 상한
+    const minSponsorNeed = needWei.add(fundTxCostCeil);
+    if (sponsorBal.lt(minSponsorNeed)) {
+      return {
+        status: 'insufficient_sponsor_balance',
+        detail: {
+          sponsor: sponsorWallet.address,
+          sponsorBal: sponsorBal.toString(),
+          needWei: needWei.toString(),
+          fundTxCostCeil: fundTxCostCeil.toString(),
+          minSponsorNeed: minSponsorNeed.toString()
+        }
+      };
+    }
+
     // --- simulate (재시도) ---
     let simOk = false;
     for (let s = 1; s <= simulateRetries; s++) {
@@ -214,6 +231,15 @@ async function rescueBundle({
     }
 
     // --- sendRawBundle (재시도) ---
+    console.log('[BUNDLE] targetBlock=%d gasLimit=%s maxFee(gwei)=%s tip(gwei)=%s needWei(ETH)=%s sponsorBal(ETH)=%s',
+      targetBlock,
+      gasLimit.toString(),
+      ethers.utils.formatUnits(maxFee, 'gwei'),
+      ethers.utils.formatUnits(tip, 'gwei'),
+      ethers.utils.formatEther(needWei),
+      ethers.utils.formatEther(sponsorBal)
+    );
+
     let resp = null;
     for (let t = 1; t <= sendRetries; t++) {
       try {
@@ -254,6 +280,7 @@ async function rescueBundle({
       }
     } catch (e) {
       entry.waitError = e?.response?.data || e?.message || String(e);
+      console.log('[WAIT] error targetBlock=%d err=%s', targetBlock, entry.waitError);
       attempts.push(entry);
       lastError = e;
     }
