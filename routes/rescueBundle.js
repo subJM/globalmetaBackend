@@ -232,7 +232,13 @@ async function rescueBundle({
   if (!provider || !relayUrl || !authWallet || !sponsorWallet || !compromisedWallet) {
     throw new Error('provider/relayUrl/authWallet/sponsorWallet/compromisedWallet are required');
   }
-
+  // rescueBundle 시작 직후(또는 루프 시작 전에 1회)
+  const extraRelays = (process.env.EXTRA_RELAYS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+  console.log('[RELAYS]', { flashbots: relayUrl, extraRelays });
+  
   // 네트워크/릴레이 체크
   const { chainId, name } = await provider.getNetwork();
   console.log('[NET] chainId=%d name=%s relay=%s', chainId, name, relayUrl);
@@ -255,8 +261,12 @@ async function rescueBundle({
   // 가스 한도 (12% 여유)
   let gasLimit;
   try {
+    // const est = await provider.estimateGas({ from: compromisedWallet.address, to: tokenAddress, data });
+    // gasLimit = bn(est).mul(112).div(100);
+    // 일시 테스트: 1.5배
     const est = await provider.estimateGas({ from: compromisedWallet.address, to: tokenAddress, data });
-    gasLimit = bn(est).mul(112).div(100);
+    gasLimit = bn(est).mul(150  ).div(100);
+    console.log('[GASLIMIT_TEST]', est.toString(), '->', gasLimit.toString());
   } catch {
     gasLimit = bn(gasLimitHint);
   }
@@ -341,11 +351,9 @@ async function rescueBundle({
   let lastError = null;
 
   for (let i = 1; i <= blocksToTry; i++) {
-    const currentBlock = await provider.getBlockNumber();
-    const targetBlock = currentBlock + 1;
-    const entry = { targetBlock, tries: [] };
-
-    for (const tipG of tipCandidates) {
+      const currentBlock = await provider.getBlockNumber();
+      const targets = [currentBlock + 2, currentBlock + 3]; // lead 2~3
+      for (const targetBlock of targets) {
       // 수수료 재계산 (base*1.3 + tip)
       const latestBlock = await provider.getBlock('latest');
       const baseCurr = bn(
@@ -397,6 +405,7 @@ async function rescueBundle({
       for (let s = 1; s <= simulateRetries; s++) {
         try {
           const sim = await fb.simulate(signedAttempt, targetBlock);
+          console.log('[SIM]', JSON.stringify(sim, null, 2).slice(0, 1200));
           if ((Array.isArray(sim) && sim[0]?.error) || sim?.error) {
             simMsg = (Array.isArray(sim) ? sim[0]?.error : sim?.error?.message) || 'simulate error';
             entry.tries.push({ tip: tipG, stage: 'simulate', ok: false, msg: simMsg });
@@ -405,6 +414,9 @@ async function rescueBundle({
             entry.tries.push({ tip: tipG, stage: 'simulate', ok: true });
             simOk = true;
           }
+            // 일부 구현은 { results: [...], coinbaseDiff } 형태
+          const coinbaseDiff = sim?.coinbaseDiff ?? sim?.results?.[0]?.coinbaseDiff;
+          if (coinbaseDiff) console.log('[SIM_PROFIT] coinbaseDiff', coinbaseDiff.toString());
           break;
         } catch (e) {
           simMsg = decodeRevert(e);
@@ -441,7 +453,8 @@ async function rescueBundle({
           targetBlockHex: targetHex
         }).catch(()=>{});
       }
-
+      console.log('[MULTI-RELAY-SUMMARY]', resMulti.map(r => ({ url: r.url, ok: r.ok, status: r.status })));
+      s
       // ⑤ 기존 Flashbots 경로도 그대로 유지
       let respAttempt = null;
       for (let t = 1; t <= sendRetries; t++) {
