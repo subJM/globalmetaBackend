@@ -13,8 +13,7 @@ const bn = (x) => ethers.BigNumber.from(String(x));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * 기본 수수료 힌트: baseFee * 1.2 + tip (TrustWallet 유사)
- * (램프 시도에서는 base*1.3+tip로 재계산)
+ * 기본 수수료 힌트: base * 1.2 + tip (TrustWallet 유사)
  */
 async function buildFees(provider, fallbackTipGwei = '5') {
   const feeData = await provider.getFeeData();
@@ -35,7 +34,7 @@ async function buildFees(provider, fallbackTipGwei = '5') {
 
   // 안전 클램프
   const minTip = ethers.utils.parseUnits('1', 'gwei');
-  const maxTip = ethers.utils.parseUnits('50', 'gwei');
+  const maxTip = ethers.utils.parseUnits('60', 'gwei');
   const clampedTip = tip.lt(minTip) ? minTip : tip.gt(maxTip) ? maxTip : tip;
 
   const clampedMaxFee = maxFee.gt(clampedTip.add(base)) ? maxFee : base.add(clampedTip);
@@ -60,11 +59,11 @@ async function rescueBundle({
   amountHuman,       // (옵션) "1.23" → decimals로 변환
   gasLimitHint = '130000',
   tipGwei = '5',
-  extraFundEth = '0.00005', // 너무 작으면 다음 블록 base 상승 시 부족 발생
+  extraFundEth = '0.00010', // 소폭 상향: 블록간 base 변동 흡수
   blocksToTry = 30,
-  simulateRetries = 1,      // Flashbots는 시뮬 실패를 바로 알려주는 편이라 1로도 충분
+  simulateRetries = 1,
   sendRetries = 2,
-  reSignEachAttempt = true, // 네트워크 변동 대응
+  reSignEachAttempt = true,
 }) {
   if (!provider || !relayUrl || !authWallet || !sponsorWallet || !compromisedWallet) {
     throw new Error('provider/relayUrl/authWallet/sponsorWallet/compromisedWallet are required');
@@ -90,7 +89,7 @@ async function rescueBundle({
   // --- transfer() 데이터 ---
   const data = token.interface.encodeFunctionData('transfer', [toAddress, finalAmountUnits]);
 
-  // --- 가스 한도 추정 (실제 estimateGas 권장) ---
+  // --- 가스 한도 추정 (estimateGas 권장) ---
   let gasLimit;
   try {
     const est = await provider.estimateGas({
@@ -98,8 +97,8 @@ async function rescueBundle({
       to: tokenAddress,
       data,
     });
-    // 5~10% 여유
-    gasLimit = bn(est).mul(11).div(10);
+    // 25% 여유(공격적 OOG 방지)
+    gasLimit = bn(est).mul(125).div(100);
   } catch {
     gasLimit = bn(gasLimitHint);
   }
@@ -146,7 +145,7 @@ async function rescueBundle({
     compromisedWallet.address, ethers.utils.formatEther(compBal), compNoncePending
   );
 
-  // 초기 수수료 힌트(로그용)
+  // 초기 수수료 힌트
   const { base, tip, maxFee } = await buildFees(provider, tipGwei);
   console.log('[FEE_HINT] base≈%s gwei tip≈%s gwei maxFee≈%s gwei',
     ethers.utils.formatUnits(base, 'gwei'),
@@ -158,13 +157,13 @@ async function rescueBundle({
   let lastError = null;
 
   for (let i = 1; i <= blocksToTry; i++) {
-    // 매 루프마다 바로 다음 블록을 타깃
+    // 매 루프마다 바로 다음 블록 지정
     const currentBlock = await provider.getBlockNumber();
     const targetBlock = currentBlock + 1;
     const entry = { targetBlock, tries: [] };
 
-    // tip 램프 (경쟁 환경 대비 상향)
-    const tipCandidatesGwei = ['10', '20', '40']; // 필요시 더 올리기: ['20','40','80']
+    // tip 램프 (잔액 0.00999 ETH 내에서 충분히 가능)
+    const tipCandidatesGwei = ['20', '40', '80', '120'];
     let included = null;
 
     for (let tipIdx = 0; tipIdx < tipCandidatesGwei.length && !included; tipIdx++) {
@@ -220,7 +219,7 @@ async function rescueBundle({
         continue;
       }
 
-      // (선택) simulate
+      // simulate (빠른 실패 감지)
       let simOk = false;
       for (let s = 1; s <= simulateRetries; s++) {
         try {
@@ -280,7 +279,7 @@ async function rescueBundle({
             attempts: attempts.concat(entry),
           };
         }
-        // 미포함이면 다음 tip 후보로
+        // 미포함이면 다음 tip 후보
       } catch (e) {
         entry.tries.push({ tip: tipCandidatesGwei[tipIdx], stage: 'wait', ok: false, msg: e?.message || String(e) });
         lastError = e;
