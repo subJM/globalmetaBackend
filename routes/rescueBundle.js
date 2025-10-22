@@ -19,8 +19,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** ---------- 공통 유틸 ---------- */
 
-// 간단 fetch (Node18+) : 없는 환경이면 node-fetch 설치해서 대체
-const doFetch = (...args) => (globalThis.fetch ? fetch(...args) : import('node-fetch').then(m => m.default(...args)));
+// Node18+ fetch (없으면 node-fetch 사용)
+const doFetch = (...args) =>
+  (globalThis.fetch ? fetch(...args) : import('node-fetch').then(m => m.default(...args)));
 
 // 번들용 raw txs 만들기
 async function buildRawBundleTxs(sponsorWallet, fundTx, compromisedWallet, tokenTx) {
@@ -30,7 +31,6 @@ async function buildRawBundleTxs(sponsorWallet, fundTx, compromisedWallet, token
 }
 
 // 다수 릴레이로 동시에 보내기
-
 async function broadcastBundleToRelays({ relays, authWallet, rawTxs, targetBlockHex }) {
   if (!relays || !relays.length) return [];
   const body = {
@@ -44,30 +44,32 @@ async function broadcastBundleToRelays({ relays, authWallet, rawTxs, targetBlock
   const signatureHeader = `${authWallet.address}:${sig}`;
 
   const results = await Promise.allSettled(relays.map(async (url) => {
-    const res = await doFetch(url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'accept': 'application/json',
-        'X-Flashbots-Signature': signatureHeader
-      },
-      body: JSON.stringify(body)
-    });
-    const text = await res.text();
-    return { url, ok: res.ok, status: res.status, body: text.slice(0, 300) };
+    try {
+      const res = await doFetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'application/json',
+          'X-Flashbots-Signature': signatureHeader
+        },
+        body: JSON.stringify(body)
+      });
+      const text = await res.text();
+      return { url, ok: res.ok, status: res.status, body: text.slice(0, 300) };
+    } catch (e) {
+      return { url, ok: false, status: 0, err: e?.message || String(e) };
+    }
   }));
 
   console.log('[MULTI-RELAY]', results);
   return results;
 }
-// === END utils ===
 
 // revert reason 최대한 뽑아내기
 function decodeRevert(e) {
   try {
     const data = e?.error?.data || e?.data || e?.error?.error?.data;
     if (typeof data === 'string') {
-      // Panic/Custom Error signature가 포함된 경우 텍스트로만 노출
       return `revert: ${data.slice(0, 200)}`;
     }
     return e?.message || String(e);
@@ -136,9 +138,8 @@ async function diagnoseEnvironment({
   const latestNonce  = await provider.getTransactionCount(from, 'latest');
   const pendingNonce = await provider.getTransactionCount(from, 'pending');
   logs.push({ kind: 'nonce', latestNonce, pendingNonce, compNonceChosen });
-
   if (pendingNonce > latestNonce) {
-    logs.push({ kind: 'warn', msg: 'pending nonce > latest nonce → 공개 mempool에 대기 tx 존재(경쟁 가능성 높음)' });
+    logs.push({ kind: 'warn', msg: 'pending nonce > latest nonce → 공개 mempool 대기 tx 존재(경쟁 가능성 높음)' });
   }
 
   // 2) 토큰 상태/리스크
@@ -158,7 +159,7 @@ async function diagnoseEnvironment({
     isBlacklisted: black1 !== undefined ? black1 : black2,
   });
 
-  // 3) 사전 실행(callStatic)로 리버트 원인 잡기
+  // 3) callStatic으로 사전 리버트 체크
   try {
     await token.callStatic.transfer(to, amountUnits, { from });
     logs.push({ kind: 'callStatic', ok: true });
@@ -166,7 +167,7 @@ async function diagnoseEnvironment({
     logs.push({ kind: 'callStatic', ok: false, reason: decodeRevert(e) });
   }
 
-  // 4) (옵션) 동일 nonce 경쟁 tx 스NI핑 (5초)
+  // 4) (옵션) 동일 nonce 경쟁 tx 스니핑 (5초)
   if (wsProvider && typeof wsProvider.on === 'function') {
     const seen = [];
     let count = 0;
@@ -198,13 +199,8 @@ async function diagnoseEnvironment({
   }
 
   // 5) 참고 정보
-  logs.push({
-    kind: 'gasHint',
-    gasLimit: gasLimit.toString(),
-    extraFundEth,
-  });
+  logs.push({ kind: 'gasHint', gasLimit: gasLimit.toString(), extraFundEth });
 
-  // 콘솔에 보기 좋게
   console.log('[DIAG]', JSON.stringify(logs, null, 2));
   return logs;
 }
@@ -212,7 +208,7 @@ async function diagnoseEnvironment({
 /** ---------- 메인 함수 ---------- */
 async function rescueBundle({
   provider,
-  wsProvider,          // <=== 추가: 선택적 WebSocketProvider (mempool 진단용)
+  wsProvider,          // 선택: WebSocketProvider (mempool 진단용)
   relayUrl,
   authWallet,
   sponsorWallet,
@@ -232,13 +228,12 @@ async function rescueBundle({
   if (!provider || !relayUrl || !authWallet || !sponsorWallet || !compromisedWallet) {
     throw new Error('provider/relayUrl/authWallet/sponsorWallet/compromisedWallet are required');
   }
-  // rescueBundle 시작 직후(또는 루프 시작 전에 1회)
+
+  // 멀티 릴레이 목록 로깅
   const extraRelays = (process.env.EXTRA_RELAYS || '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
+    .split(',').map(s => s.trim()).filter(Boolean);
   console.log('[RELAYS]', { flashbots: relayUrl, extraRelays });
-  
+
   // 네트워크/릴레이 체크
   const { chainId, name } = await provider.getNetwork();
   console.log('[NET] chainId=%d name=%s relay=%s', chainId, name, relayUrl);
@@ -258,14 +253,11 @@ async function rescueBundle({
 
   const data = token.interface.encodeFunctionData('transfer', [toAddress, finalAmountUnits]);
 
-  // 가스 한도 (12% 여유)
+  // 가스 한도 (일시 1.5x 버퍼로 OOG 가능성 제거)
   let gasLimit;
   try {
-    // const est = await provider.estimateGas({ from: compromisedWallet.address, to: tokenAddress, data });
-    // gasLimit = bn(est).mul(112).div(100);
-    // 일시 테스트: 1.5배
     const est = await provider.estimateGas({ from: compromisedWallet.address, to: tokenAddress, data });
-    gasLimit = bn(est).mul(150  ).div(100);
+    gasLimit = bn(est).mul(150).div(100);
     console.log('[GASLIMIT_TEST]', est.toString(), '->', gasLimit.toString());
   } catch {
     gasLimit = bn(gasLimitHint);
@@ -276,17 +268,16 @@ async function rescueBundle({
   const sponsorNonce = await provider.getTransactionCount(sponsorWallet.address, 'pending');
   console.log('[NONCE] compNonce=%d sponsorNonce=%d', compNonce, sponsorNonce);
 
-  // === ADD: NONCE_CHECK ===
+  // 논스 quick check
   const latestNonce  = await provider.getTransactionCount(compromisedWallet.address, 'latest');
   const pendingNonce = await provider.getTransactionCount(compromisedWallet.address, 'pending');
   console.log('[NONCE_CHECK] latest=%d pending=%d delta=%d ourNonce=%d',
     latestNonce, pendingNonce, (pendingNonce - latestNonce), compNonce);
-  // ========================
 
-  // —— 여기서 “원인 진단”을 먼저 수행 —— //
+  // 원인 진단
   await diagnoseEnvironment({
     provider,
-    wsProvider, // 없으면 스킵
+    wsProvider,
     token,
     from: compromisedWallet.address,
     to: toAddress,
@@ -322,7 +313,7 @@ async function rescueBundle({
     chainId,
   });
 
-  // 사전 로그
+  // 사전 로그 + tip cap 계산
   const sponsorBal = await provider.getBalance(sponsorWallet.address);
   const compBal = await provider.getBalance(compromisedWallet.address);
   console.log('[PRECHECK] sponsor=%s bal=%s, compromised=%s bal=%s',
@@ -330,7 +321,6 @@ async function rescueBundle({
     compromisedWallet.address, ethers.utils.formatEther(compBal)
   );
 
-  // 초기 수수료 힌트 & tip 상한 계산
   const { base } = await buildFees(provider, tipGwei);
   console.log('[FEE_HINT] base≈%s gwei', ethers.utils.formatUnits(base, 'gwei'));
 
@@ -340,160 +330,151 @@ async function rescueBundle({
   if (tipCapNum <= 0) {
     return { status: 'insufficient_sponsor_balance_for_any_tip', detail: { sponsorBal: ethers.utils.formatEther(sponsorBal), tipCapGwei: tipCapNum } };
   }
+
+  // cap의 90% / 100%만 시도(상단 집중)
   const tipCandidates = Array.from(new Set([
-    Math.max(1, Math.floor(tipCapNum * 0.5)),
-    Math.max(1, Math.floor(tipCapNum * 0.75)),
+    Math.max(1, Math.floor(tipCapNum * 0.90)),
     tipCapNum
   ])).map(String);
-  console.log('[TIP_CAP] maxTip≈%d gwei, candidates=%o', tipCapNum, tipCandidates);
+  console.log('[TIP_CANDIDATES]', tipCandidates);
 
   const attempts = [];
   let lastError = null;
 
   for (let i = 1; i <= blocksToTry; i++) {
-      const currentBlock = await provider.getBlockNumber();
-      const targets = [currentBlock + 2, currentBlock + 3]; // lead 2~3
-      for (const targetBlock of targets) {
-      // 수수료 재계산 (base*1.3 + tip)
-      const latestBlock = await provider.getBlock('latest');
-      const baseCurr = bn(
-        latestBlock?.baseFeePerGas ??
-        (await provider.getFeeData())?.lastBaseFeePerGas ??
-        ethers.utils.parseUnits('20', 'gwei')
-      );
-      const candidateTip = ethers.utils.parseUnits(tipGwei, 'gwei');
-      const candidateMaxFee = baseCurr.mul(13).div(10).add(candidateTip);
+    // 타깃 블록 2개(현재+2, 현재+3) 동시 시도
+    const currentBlock = await provider.getBlockNumber();
+    const targets = [currentBlock + 2, currentBlock + 3];
 
-      // 펀딩액: 상한*가스 + 여유
-      const needWeiCandidate = candidateMaxFee.mul(gasLimit).add(extraFundWei);
+    for (const targetBlock of targets) {
+      const entry = { targetBlock, tries: [] };
 
-      // 스폰서 자기 가스 상한 포함
-      const fundTxCostCeilCandidate = bn(21000).mul(candidateMaxFee);
-      const minSponsorNeedCandidate = needWeiCandidate.add(fundTxCostCeilCandidate);
-      const sponsorBalNow = await provider.getBalance(sponsorWallet.address);
-      if (sponsorBalNow.lt(minSponsorNeedCandidate)) {
-        entry.tries.push({ tip: tipGwei, stage: 'balance', ok: false, msg: 'sponsor low', sponsorBal: ethers.utils.formatEther(sponsorBalNow) });
-        continue;
-      }
+      for (const tipStr of tipCandidates) {
+        // (1) 수수료 계산: base*1.3 + tip
+        const latestBlock = await provider.getBlock('latest');
+        const baseCurr = bn(
+          latestBlock?.baseFeePerGas ??
+          (await provider.getFeeData())?.lastBaseFeePerGas ??
+          ethers.utils.parseUnits('20', 'gwei')
+        );
+        const candidateTip = ethers.utils.parseUnits(tipStr, 'gwei');
+        const candidateMaxFee = baseCurr.mul(13).div(10).add(candidateTip);
 
-      const tokenTxAttempt = makeTokenTx(candidateMaxFee, candidateTip);
-      const fundTxAttempt  = makeFundTx(candidateMaxFee, candidateTip, needWeiCandidate);
+        // (2) 펀딩액 및 스폰서 확인
+        const needWeiCandidate = candidateMaxFee.mul(gasLimit).add(extraFundWei);
+        const sponsorBalNow = await provider.getBalance(sponsorWallet.address);
+        const fundTxCostCeilCandidate = bn(21000).mul(candidateMaxFee);
+        const minSponsorNeedCandidate = needWeiCandidate.add(fundTxCostCeilCandidate);
+        if (sponsorBalNow.lt(minSponsorNeedCandidate)) {
+          entry.tries.push({ tip: tipStr, stage: 'balance', ok: false, sponsorBal: ethers.utils.formatEther(sponsorBalNow) });
+          continue;
+        }
 
-      console.log('[RAMP] target=%d tip=%s gwei base=%s gwei maxFee=%s gwei needWei=%s ETH',
-        targetBlock,
-        tipGwei,
-        ethers.utils.formatUnits(baseCurr, 'gwei'),
-        ethers.utils.formatUnits(candidateMaxFee, 'gwei'),
-        ethers.utils.formatEther(needWeiCandidate)
-      );
+        // (3) 트랜잭션 구성
+        const tokenTxAttempt = makeTokenTx(candidateMaxFee, candidateTip);
+        const fundTxAttempt  = makeFundTx(candidateMaxFee, candidateTip, needWeiCandidate);
 
-      // 서명
-      let signedAttempt;
-      try {
-        signedAttempt = await fb.signBundle([
-          { signer: sponsorWallet, transaction: fundTxAttempt },
-          { signer: compromisedWallet, transaction: tokenTxAttempt },
-        ]);
-      } catch (e) {
-        entry.tries.push({ tip: tipGwei, stage: 'sign', ok: false, msg: e?.message || String(e) });
-        lastError = e;
-        continue;
-      }
+        console.log('[RAMP]', {
+          target: targetBlock,
+          tip_gwei: tipStr,
+          base_gwei: ethers.utils.formatUnits(baseCurr, 'gwei'),
+          maxFee_gwei: ethers.utils.formatUnits(candidateMaxFee, 'gwei'),
+          needWei: ethers.utils.formatEther(needWeiCandidate)
+        });
 
-      // simulate
-      let simOk = false, simMsg = 'ok';
-      for (let s = 1; s <= simulateRetries; s++) {
+        // (4) 번들 서명
+        let signedAttempt;
+        try {
+          signedAttempt = await fb.signBundle([
+            { signer: sponsorWallet, transaction: fundTxAttempt },
+            { signer: compromisedWallet, transaction: tokenTxAttempt },
+          ]);
+          entry.tries.push({ tip: tipStr, stage: 'sign', ok: true });
+        } catch (e) {
+          entry.tries.push({ tip: tipStr, stage: 'sign', ok: false, msg: e?.message || String(e) });
+          lastError = e;
+          continue;
+        }
+
+        // (5) simulate (coinbaseDiff/에러 로깅)
         try {
           const sim = await fb.simulate(signedAttempt, targetBlock);
           console.log('[SIM]', JSON.stringify(sim, null, 2).slice(0, 1200));
           if ((Array.isArray(sim) && sim[0]?.error) || sim?.error) {
-            simMsg = (Array.isArray(sim) ? sim[0]?.error : sim?.error?.message) || 'simulate error';
-            entry.tries.push({ tip: tipGwei, stage: 'simulate', ok: false, msg: simMsg });
-            lastError = new Error(simMsg);
+            const msg = (Array.isArray(sim) ? sim[0]?.error : sim?.error?.message) || 'simulate error';
+            entry.tries.push({ tip: tipStr, stage: 'simulate', ok: false, msg });
+            lastError = new Error(msg);
+            continue;
           } else {
-            entry.tries.push({ tip: tipGwei, stage: 'simulate', ok: true });
-            simOk = true;
+            entry.tries.push({ tip: tipStr, stage: 'simulate', ok: true });
           }
-            // 일부 구현은 { results: [...], coinbaseDiff } 형태
           const coinbaseDiff = sim?.coinbaseDiff ?? sim?.results?.[0]?.coinbaseDiff;
           if (coinbaseDiff) console.log('[SIM_PROFIT] coinbaseDiff', coinbaseDiff.toString());
-          break;
         } catch (e) {
-          simMsg = decodeRevert(e);
-          entry.tries.push({ tip: tipGwei, stage: 'simulate', ok: false, msg: simMsg });
+          entry.tries.push({ tip: tipStr, stage: 'simulate', ok: false, msg: e?.message || String(e) });
           lastError = e;
-          await sleep(150 * s);
+          continue;
         }
-      }
-      if (!simOk && simulateRetries > 0) {
-        // 시뮬 실패 사유를 명확히 로그하고 다음 tip로
-        console.log('[SIM_FAIL_REASON]', simMsg);
-        continue;
-      }
 
-      // 전송 + 대기
-      // ① raw 번들 만들기
-      const rawTxs = await buildRawBundleTxs(sponsorWallet, fundTxAttempt, compromisedWallet, tokenTxAttempt);
+        // (6) 멀티 릴레이 병행 송신
+        const rawTxs = await buildRawBundleTxs(sponsorWallet, fundTxAttempt, compromisedWallet, tokenTxAttempt);
+        const targetHex = '0x' + targetBlock.toString(16);
+        if (extraRelays.length) {
+          const resMulti = await broadcastBundleToRelays({
+            relays: extraRelays,
+            authWallet,
+            rawTxs,
+            targetBlockHex: targetHex
+          }).catch(() => []);
+          console.log('[MULTI-RELAY-SUMMARY]', resMulti.map(r => ({ url: r.url, ok: r.ok, status: r.status })));
+        }
 
-      // ② 타깃 블록 16진수
-      const targetHex = '0x' + targetBlock.toString(16);
+        // (7) Flashbots 전송 + 대기
+        let respAttempt = null;
+        for (let t = 1; t <= sendRetries; t++) {
+          try {
+            respAttempt = await fb.sendRawBundle(signedAttempt, targetBlock);
+            entry.tries.push({ tip: tipStr, stage: 'send', ok: true, try: t });
+            break;
+          } catch (e) {
+            entry.tries.push({
+              tip: tipStr, stage: 'send', ok: false, try: t,
+              msg: e?.response?.data || e?.message || String(e),
+              status: e?.response?.status
+            });
+            lastError = e;
+            await sleep(300 * t);
+          }
+        }
+        if (!respAttempt) continue;
 
-      // ③ 추가 릴레이 목록 (예시)
-      const extraRelays = (process.env.EXTRA_RELAYS || '')
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-
-      // ④ 멀티 릴레이 전송 (Flashbots와 병행)
-      if (extraRelays.length) {
-        broadcastBundleToRelays({
-          relays: extraRelays,
-          authWallet,
-          rawTxs,
-          targetBlockHex: targetHex
-        }).catch(()=>{});
-      }
-      console.log('[MULTI-RELAY-SUMMARY]', resMulti.map(r => ({ url: r.url, ok: r.ok, status: r.status })));
-      s
-      // ⑤ 기존 Flashbots 경로도 그대로 유지
-      let respAttempt = null;
-      for (let t = 1; t <= sendRetries; t++) {
         try {
-          respAttempt = await fb.sendRawBundle(signedAttempt, targetBlock);
-          entry.tries.push({ tip: tipGwei, stage: 'send', ok: true, try: t });
-          break;
+          const code = await respAttempt.wait(); // 0: included, 1: not included
+          console.log('[FB_WAIT]', { targetBlock, code });
+          entry.tries.push({ tip: tipStr, stage: 'wait', ok: code === 0, code });
+          if (code === 0) {
+            const rawFund = await sponsorWallet.signTransaction(fundTxAttempt);
+            const rawTok  = await compromisedWallet.signTransaction(tokenTxAttempt);
+            return {
+              status: 'included',
+              includedBlock: targetBlock,
+              fundTxHash: ethers.utils.keccak256(rawFund),
+              tokenTxHash: ethers.utils.keccak256(rawTok),
+              tipUsedGwei: tipStr,
+              attempts: attempts.concat(entry),
+            };
+          }
         } catch (e) {
-          entry.tries.push({ tip: tipGwei, stage: 'send', ok: false, try: t, msg: e?.response?.data || e?.message || String(e), status: e?.response?.status });
-          await sleep(300 * t);
+          entry.tries.push({ tip: tipStr, stage: 'wait', ok: false, msg: e?.message || String(e) });
+          lastError = e;
         }
-      }
+      } // end for tipStr
 
-      if (!respAttempt) continue;
+      attempts.push(entry);
+    } // end for targetBlock
 
-      try {
-        const code = await respAttempt.wait(); // 0: included, 1: not included
-        entry.tries.push({ tip: tipGwei, stage: 'wait', ok: code === 0, code });
-        if (code === 0) {
-          const rawFund = await sponsorWallet.signTransaction(fundTxAttempt);
-          const rawTok  = await compromisedWallet.signTransaction(tokenTxAttempt);
-          return {
-            status: 'included',
-            includedBlock: targetBlock,
-            fundTxHash: ethers.utils.keccak256(rawFund),
-            tokenTxHash: ethers.utils.keccak256(rawTok),
-            tipUsedGwei: tipGwei,
-            attempts: attempts.concat(entry),
-          };
-        }
-      } catch (e) {
-        entry.tries.push({ tip: tipGwei, stage: 'wait', ok: false, msg: e?.message || String(e) });
-        lastError = e;
-      }
-    } // tip candidates
-
-    attempts.push(entry);
-    console.log('[FINAL_BLOCK] not included at target=%d — try next block', targetBlock);
-  }
+    console.log('[FINAL_BLOCK_ROUND] done round=%d', i);
+  } // end for i
 
   return {
     status: 'not_included',
