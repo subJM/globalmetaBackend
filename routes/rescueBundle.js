@@ -1,6 +1,7 @@
 // services/rescueBundle.js
 require('dotenv').config();
 const { ethers } = require('ethers');
+const crypto = require('crypto');
 const { FlashbotsBundleProvider } = require('@flashbots/ethers-provider-bundle');
 
 const ERC20_ABI = [
@@ -17,6 +18,65 @@ const bn = (x) => ethers.BigNumber.from(String(x));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** ---------- 공통 유틸 ---------- */
+
+// 간단 fetch (Node18+) : 없는 환경이면 node-fetch 설치해서 대체
+const doFetch = (...args) => (globalThis.fetch ? fetch(...args) : import('node-fetch').then(m => m.default(...args)));
+
+// 번들용 raw txs 만들기
+async function buildRawBundleTxs(sponsorWallet, fundTx, compromisedWallet, tokenTx) {
+  const rawFund = await sponsorWallet.signTransaction(fundTx);
+  const rawTok  = await compromisedWallet.signTransaction(tokenTx);
+  return [rawFund, rawTok];
+}
+
+// 다수 릴레이로 동시에 보내기
+async function broadcastBundleToRelays({
+  relays,            // ['https://relay.flashbots.net', 'https://builder.xyz/rpc', ...]
+  authWallet,        // 헤더 서명용
+  rawTxs,            // ['0x02f9...', '0x02f9...']
+  targetBlockHex,    // '0x...'  (0x-prefixed hex)
+  minTimestamp,      // optional
+  maxTimestamp       // optional
+}) {
+  const body = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'eth_sendBundle',
+    params: [{
+      txs: rawTxs,
+      blockNumber: targetBlockHex,
+      minTimestamp,
+      maxTimestamp
+    }]
+  };
+
+  const results = [];
+  // auth 시그니처: 대부분 릴레이가 X-Flashbots-Signature를 그대로 수용
+  const sigPayload = crypto.randomBytes(8).toString('hex');
+  const sig = await authWallet.signMessage(sigPayload);
+  const signatureHeader = `${authWallet.address}:${sig}`;
+
+  await Promise.allSettled(relays.map(async (url) => {
+    try {
+      const res = await doFetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'application/json',
+          'X-Flashbots-Signature': signatureHeader
+        },
+        body: JSON.stringify(body)
+      });
+      const text = await res.text();
+      results.push({ url, ok: res.ok, status: res.status, body: text.slice(0, 500) });
+    } catch (e) {
+      results.push({ url, ok: false, status: 0, err: e?.message || String(e) });
+    }
+  }));
+
+  console.log('[MULTI-RELAY]', results);
+  return results;
+}
 
 // revert reason 최대한 뽑아내기
 function decodeRevert(e) {
@@ -369,6 +429,29 @@ async function rescueBundle({
       }
 
       // 전송 + 대기
+      // ① raw 번들 만들기
+      const rawTxs = await buildRawBundleTxs(sponsorWallet, fundTxAttempt, compromisedWallet, tokenTxAttempt);
+
+      // ② 타깃 블록 16진수
+      const targetHex = '0x' + targetBlock.toString(16);
+
+      // ③ 추가 릴레이 목록 (예시)
+      const extraRelays = (process.env.EXTRA_RELAYS || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+
+      // ④ 멀티 릴레이 전송 (Flashbots와 병행)
+      if (extraRelays.length) {
+        broadcastBundleToRelays({
+          relays: extraRelays,
+          authWallet,
+          rawTxs,
+          targetBlockHex: targetHex
+        }).catch(()=>{});
+      }
+
+      // ⑤ 기존 Flashbots 경로도 그대로 유지
       let respAttempt = null;
       for (let t = 1; t <= sendRetries; t++) {
         try {
@@ -376,15 +459,11 @@ async function rescueBundle({
           entry.tries.push({ tip: tipG, stage: 'send', ok: true, try: t });
           break;
         } catch (e) {
-          entry.tries.push({
-            tip: tipG, stage: 'send', ok: false, try: t,
-            msg: e?.response?.data || e?.message || String(e),
-            status: e?.response?.status
-          });
-          lastError = e;
+          entry.tries.push({ tip: tipG, stage: 'send', ok: false, try: t, msg: e?.response?.data || e?.message || String(e), status: e?.response?.status });
           await sleep(300 * t);
         }
       }
+
       if (!respAttempt) continue;
 
       try {
