@@ -31,6 +31,17 @@ app.use(cors({
   credentials: true // 쿠키나 인증 정보를 포함할 수 있도록 설정
 }));
 
+// 가장 위쪽, 라우트보다 먼저
+app.use((req, res, next) => {
+  const p = req.path || '';
+  // 숨김파일, .git, 백업파일 등 차단
+  if (/(^|\/)\./.test(p) || /\.(bak|old|swp|tmp|log)$/i.test(p)) {
+    return res.status(403).send('Forbidden');
+  }
+  next();
+});
+
+
 app.use(logger('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));

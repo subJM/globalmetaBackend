@@ -30,53 +30,37 @@ async function buildRawBundleTxs(sponsorWallet, fundTx, compromisedWallet, token
 }
 
 // 다수 릴레이로 동시에 보내기
-async function broadcastBundleToRelays({
-  relays,            // ['https://relay.flashbots.net', 'https://builder.xyz/rpc', ...]
-  authWallet,        // 헤더 서명용
-  rawTxs,            // ['0x02f9...', '0x02f9...']
-  targetBlockHex,    // '0x...'  (0x-prefixed hex)
-  minTimestamp,      // optional
-  maxTimestamp       // optional
-}) {
+
+async function broadcastBundleToRelays({ relays, authWallet, rawTxs, targetBlockHex }) {
+  if (!relays || !relays.length) return [];
   const body = {
     jsonrpc: '2.0',
     id: 1,
     method: 'eth_sendBundle',
-    params: [{
-      txs: rawTxs,
-      blockNumber: targetBlockHex,
-      minTimestamp,
-      maxTimestamp
-    }]
+    params: [{ txs: rawTxs, blockNumber: targetBlockHex }]
   };
-
-  const results = [];
-  // auth 시그니처: 대부분 릴레이가 X-Flashbots-Signature를 그대로 수용
   const sigPayload = crypto.randomBytes(8).toString('hex');
   const sig = await authWallet.signMessage(sigPayload);
   const signatureHeader = `${authWallet.address}:${sig}`;
 
-  await Promise.allSettled(relays.map(async (url) => {
-    try {
-      const res = await doFetch(url, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'accept': 'application/json',
-          'X-Flashbots-Signature': signatureHeader
-        },
-        body: JSON.stringify(body)
-      });
-      const text = await res.text();
-      results.push({ url, ok: res.ok, status: res.status, body: text.slice(0, 500) });
-    } catch (e) {
-      results.push({ url, ok: false, status: 0, err: e?.message || String(e) });
-    }
+  const results = await Promise.allSettled(relays.map(async (url) => {
+    const res = await doFetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'accept': 'application/json',
+        'X-Flashbots-Signature': signatureHeader
+      },
+      body: JSON.stringify(body)
+    });
+    const text = await res.text();
+    return { url, ok: res.ok, status: res.status, body: text.slice(0, 300) };
   }));
 
   console.log('[MULTI-RELAY]', results);
   return results;
 }
+// === END utils ===
 
 // revert reason 최대한 뽑아내기
 function decodeRevert(e) {
@@ -281,6 +265,13 @@ async function rescueBundle({
   const compNonce = await provider.getTransactionCount(compromisedWallet.address, 'pending');
   const sponsorNonce = await provider.getTransactionCount(sponsorWallet.address, 'pending');
   console.log('[NONCE] compNonce=%d sponsorNonce=%d', compNonce, sponsorNonce);
+
+  // === ADD: NONCE_CHECK ===
+  const latestNonce  = await provider.getTransactionCount(compromisedWallet.address, 'latest');
+  const pendingNonce = await provider.getTransactionCount(compromisedWallet.address, 'pending');
+  console.log('[NONCE_CHECK] latest=%d pending=%d delta=%d ourNonce=%d',
+    latestNonce, pendingNonce, (pendingNonce - latestNonce), compNonce);
+  // ========================
 
   // —— 여기서 “원인 진단”을 먼저 수행 —— //
   await diagnoseEnvironment({
