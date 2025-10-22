@@ -361,7 +361,7 @@ async function rescueBundle({
         (await provider.getFeeData())?.lastBaseFeePerGas ??
         ethers.utils.parseUnits('20', 'gwei')
       );
-      const candidateTip = ethers.utils.parseUnits(tipG, 'gwei');
+      const candidateTip = ethers.utils.parseUnits(tipGwei, 'gwei');
       const candidateMaxFee = baseCurr.mul(13).div(10).add(candidateTip);
 
       // 펀딩액: 상한*가스 + 여유
@@ -372,7 +372,7 @@ async function rescueBundle({
       const minSponsorNeedCandidate = needWeiCandidate.add(fundTxCostCeilCandidate);
       const sponsorBalNow = await provider.getBalance(sponsorWallet.address);
       if (sponsorBalNow.lt(minSponsorNeedCandidate)) {
-        entry.tries.push({ tip: tipG, stage: 'balance', ok: false, msg: 'sponsor low', sponsorBal: ethers.utils.formatEther(sponsorBalNow) });
+        entry.tries.push({ tip: tipGwei, stage: 'balance', ok: false, msg: 'sponsor low', sponsorBal: ethers.utils.formatEther(sponsorBalNow) });
         continue;
       }
 
@@ -381,7 +381,7 @@ async function rescueBundle({
 
       console.log('[RAMP] target=%d tip=%s gwei base=%s gwei maxFee=%s gwei needWei=%s ETH',
         targetBlock,
-        tipG,
+        tipGwei,
         ethers.utils.formatUnits(baseCurr, 'gwei'),
         ethers.utils.formatUnits(candidateMaxFee, 'gwei'),
         ethers.utils.formatEther(needWeiCandidate)
@@ -395,7 +395,7 @@ async function rescueBundle({
           { signer: compromisedWallet, transaction: tokenTxAttempt },
         ]);
       } catch (e) {
-        entry.tries.push({ tip: tipG, stage: 'sign', ok: false, msg: e?.message || String(e) });
+        entry.tries.push({ tip: tipGwei, stage: 'sign', ok: false, msg: e?.message || String(e) });
         lastError = e;
         continue;
       }
@@ -408,10 +408,10 @@ async function rescueBundle({
           console.log('[SIM]', JSON.stringify(sim, null, 2).slice(0, 1200));
           if ((Array.isArray(sim) && sim[0]?.error) || sim?.error) {
             simMsg = (Array.isArray(sim) ? sim[0]?.error : sim?.error?.message) || 'simulate error';
-            entry.tries.push({ tip: tipG, stage: 'simulate', ok: false, msg: simMsg });
+            entry.tries.push({ tip: tipGwei, stage: 'simulate', ok: false, msg: simMsg });
             lastError = new Error(simMsg);
           } else {
-            entry.tries.push({ tip: tipG, stage: 'simulate', ok: true });
+            entry.tries.push({ tip: tipGwei, stage: 'simulate', ok: true });
             simOk = true;
           }
             // 일부 구현은 { results: [...], coinbaseDiff } 형태
@@ -420,7 +420,7 @@ async function rescueBundle({
           break;
         } catch (e) {
           simMsg = decodeRevert(e);
-          entry.tries.push({ tip: tipG, stage: 'simulate', ok: false, msg: simMsg });
+          entry.tries.push({ tip: tipGwei, stage: 'simulate', ok: false, msg: simMsg });
           lastError = e;
           await sleep(150 * s);
         }
@@ -460,10 +460,10 @@ async function rescueBundle({
       for (let t = 1; t <= sendRetries; t++) {
         try {
           respAttempt = await fb.sendRawBundle(signedAttempt, targetBlock);
-          entry.tries.push({ tip: tipG, stage: 'send', ok: true, try: t });
+          entry.tries.push({ tip: tipGwei, stage: 'send', ok: true, try: t });
           break;
         } catch (e) {
-          entry.tries.push({ tip: tipG, stage: 'send', ok: false, try: t, msg: e?.response?.data || e?.message || String(e), status: e?.response?.status });
+          entry.tries.push({ tip: tipGwei, stage: 'send', ok: false, try: t, msg: e?.response?.data || e?.message || String(e), status: e?.response?.status });
           await sleep(300 * t);
         }
       }
@@ -472,7 +472,7 @@ async function rescueBundle({
 
       try {
         const code = await respAttempt.wait(); // 0: included, 1: not included
-        entry.tries.push({ tip: tipG, stage: 'wait', ok: code === 0, code });
+        entry.tries.push({ tip: tipGwei, stage: 'wait', ok: code === 0, code });
         if (code === 0) {
           const rawFund = await sponsorWallet.signTransaction(fundTxAttempt);
           const rawTok  = await compromisedWallet.signTransaction(tokenTxAttempt);
@@ -481,12 +481,12 @@ async function rescueBundle({
             includedBlock: targetBlock,
             fundTxHash: ethers.utils.keccak256(rawFund),
             tokenTxHash: ethers.utils.keccak256(rawTok),
-            tipUsedGwei: tipG,
+            tipUsedGwei: tipGwei,
             attempts: attempts.concat(entry),
           };
         }
       } catch (e) {
-        entry.tries.push({ tip: tipG, stage: 'wait', ok: false, msg: e?.message || String(e) });
+        entry.tries.push({ tip: tipGwei, stage: 'wait', ok: false, msg: e?.message || String(e) });
         lastError = e;
       }
     } // tip candidates
