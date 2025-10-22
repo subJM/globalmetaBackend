@@ -17,108 +17,20 @@ const ERC20_ABI = [
 const bn = (x) => ethers.BigNumber.from(String(x));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** ---------- 공통 유틸 ---------- */
-
 // Node18+ fetch (없으면 node-fetch 사용)
 const doFetch = (...args) =>
   (globalThis.fetch ? fetch(...args) : import('node-fetch').then(m => m.default(...args)));
 
-// 번들용 raw txs 만들기
-async function buildRawBundleTxs(sponsorWallet, fundTx, compromisedWallet, tokenTx) {
-  const rawFund = await sponsorWallet.signTransaction(fundTx);
-  const rawTok  = await compromisedWallet.signTransaction(tokenTx);
-  return [rawFund, rawTok];
-}
-
-// 다수 릴레이로 동시에 보내기
-async function broadcastBundleToRelays({ relays, authWallet, rawTxs, targetBlockHex }) {
-  if (!relays || !relays.length) return [];
-  const body = {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'eth_sendBundle',
-    params: [{ txs: rawTxs, blockNumber: targetBlockHex }]
-  };
-  const sigPayload = crypto.randomBytes(8).toString('hex');
-  const sig = await authWallet.signMessage(sigPayload);
-  const signatureHeader = `${authWallet.address}:${sig}`;
-
-  const settled = await Promise.allSettled(relays.map(async (url) => {
-    try {
-      const res = await doFetch(url, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'accept': 'application/json',
-          'X-Flashbots-Signature': signatureHeader
-        },
-        body: JSON.stringify(body)
-      });
-      const text = await res.text();
-      return { url, ok: res.ok, httpStatus: res.status, body: text.slice(0, 300) };
-    } catch (e) {
-      return { url, ok: false, httpStatus: 0, err: e?.message || String(e) };
-    }
-  }));
-
-  // ⚠️ 여기서 평탄화
-  const flat = settled.map(item =>
-    item.status === 'fulfilled' ? item.value
-                                : { url: '(unknown)', ok: false, httpStatus: 0, err: item.reason?.message || String(item.reason) }
-  );
-
-  console.log('[MULTI-RELAY]', flat);
-  return flat;
-}
-function normalizeRelayUrls(raw) {
-  return (raw || '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean)
-    // credentials 제거: https://user@host → https://host
-    .map(u => {
-      try {
-        const url = new URL(u);
-        if (url.username || url.password) {
-          url.username = '';
-          url.password = '';
-          console.warn('[RELAYS] stripped credentials from', u, '=>', url.toString());
-        }
-        return url.toString();
-      } catch {
-        console.warn('[RELAYS] invalid url skipped:', u);
-        return null;
-      }
-    })
-    .filter(Boolean)
-    // 서처가 eth_sendBundle를 직접 칠 수 없는 도메인 제외(정보성)
-    .filter(u => {
-      const host = new URL(u).host;
-      const unsupported =
-        host.includes('blxrbdn.com') ||      // bloXroute는 blxr_submit_bundle 사용
-        host.includes('aestus.live') ||      // mev-boost relay (validator용)
-        host.includes('agnostic-relay.net'); // mev-boost relay (validator용)
-      if (unsupported) {
-        console.warn('[RELAYS] unsupported for eth_sendBundle (skipped):', u);
-      }
-      return !unsupported;
-    });
-}
-
-// revert reason 최대한 뽑아내기
 function decodeRevert(e) {
   try {
     const data = e?.error?.data || e?.data || e?.error?.error?.data;
-    if (typeof data === 'string') {
-      return `revert: ${data.slice(0, 200)}`;
-    }
+    if (typeof data === 'string') return `revert: ${data.slice(0, 200)}`;
     return e?.message || String(e);
-  } catch (_) {
+  } catch {
     return e?.message || String(e);
   }
 }
 
-// 안전한 선택적 호출 (없으면 false/undefined)
 async function safeReadBool(contract, fn, args = []) {
   if (!contract.interface.functions[fn]) return undefined;
   try { return await contract[fn](...args); } catch { return undefined; }
@@ -161,7 +73,123 @@ function computeMaxTipGweiCap({ sponsorBalWei, baseWei, gasLimit, extraFundWei }
   return tipGweiMax;
 }
 
-/** ---------- 원인 진단(핵심) ---------- */
+/** 번들 raw txs */
+async function buildRawBundleTxs(sponsorWallet, fundTx, compromisedWallet, tokenTx) {
+  const rawFund = await sponsorWallet.signTransaction(fundTx);
+  const rawTok  = await compromisedWallet.signTransaction(tokenTx);
+  return [rawFund, rawTok];
+}
+
+/** (참고용) 추가 릴레이 URL 정리 — 서처가 eth_sendBundle 칠 수 없는 릴레이는 자동 제외 */
+function normalizeRelayUrls(raw) {
+  return (raw || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(u => {
+      try {
+        const url = new URL(u);
+        if (url.username || url.password) {
+          url.username = '';
+          url.password = '';
+          console.warn('[RELAYS] stripped credentials from', u, '=>', url.toString());
+        }
+        return url.toString();
+      } catch {
+        console.warn('[RELAYS] invalid url skipped:', u);
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .filter(u => {
+      const host = new URL(u).host;
+      const unsupported =
+        host.includes('boost-relay.flashbots.net') || // mev-boost (validator용, 405)
+        host.includes('blxrbdn.com') ||               // bloXroute는 전용 API 필요
+        host.includes('aestus.live') ||
+        host.includes('agnostic-relay.net');
+      if (unsupported) console.warn('[RELAYS] unsupported for eth_sendBundle (skipped):', u);
+      return !unsupported;
+    });
+}
+
+/** (선택) bloXroute 전송 — API Key 필요 */
+async function sendBundleViaBloxroute({ rawTxs, targetBlockHex }) {
+  const apiKey = process.env.BLXR_API_KEY;
+  if (!apiKey) return { used: false };
+
+  const body = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'blxr_submit_bundle',
+    params: [{
+      transaction: rawTxs,
+      blockchain: 'ETH',
+      // block_number는 정책에 맞게: 고정 타깃 or 미지정(릴레이 라우팅)
+      block_number: targetBlockHex
+    }]
+  };
+
+  let res, text;
+  try {
+    res = await doFetch('https://api.blxrbdn.com', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'X-API-KEY': apiKey
+      },
+      body: JSON.stringify(body)
+    });
+    text = await res.text();
+  } catch (e) {
+    console.log('[BLXR_ERR]', e?.message || String(e));
+    return { used: true, ok: false, status: 0, err: e?.message || String(e) };
+  }
+
+  console.log('[BLXR]', res.status, (text || '').slice(0, 600));
+  return { used: true, ok: res.ok, status: res.status };
+}
+
+/** (옵션) 외부 릴레이로 eth_sendBundle (현재 실사용 없음 — 대부분 거부) */
+async function broadcastBundleToRelays({ relays, authWallet, rawTxs, targetBlockHex }) {
+  if (!relays || !relays.length) return [];
+  const body = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'eth_sendBundle',
+    params: [{ txs: rawTxs, blockNumber: targetBlockHex }]
+  };
+  const sigPayload = crypto.randomBytes(8).toString('hex');
+  const sig = await authWallet.signMessage(sigPayload);
+  const signatureHeader = `${authWallet.address}:${sig}`;
+
+  const settled = await Promise.allSettled(relays.map(async (url) => {
+    try {
+      const res = await doFetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'application/json',
+          'X-Flashbots-Signature': signatureHeader
+        },
+        body: JSON.stringify(body)
+      });
+      const text = await res.text();
+      return { url, ok: res.ok, httpStatus: res.status, body: text.slice(0, 300) };
+    } catch (e) {
+      return { url, ok: false, httpStatus: 0, err: e?.message || String(e) };
+    }
+  }));
+
+  const flat = settled.map(item =>
+    item.status === 'fulfilled' ? item.value
+                                : { url: '(unknown)', ok: false, httpStatus: 0, err: item.reason?.message || String(item.reason) }
+  );
+  console.log('[MULTI-RELAY]', flat);
+  return flat;
+}
+
+/** 환경 진단 */
 async function diagnoseEnvironment({
   provider,
   wsProvider,               // optional: WebSocketProvider
@@ -173,20 +201,16 @@ async function diagnoseEnvironment({
   extraFundEth,
 }) {
   const logs = [];
-
-  // 1) nonce 상황
   const latestNonce  = await provider.getTransactionCount(from, 'latest');
   const pendingNonce = await provider.getTransactionCount(from, 'pending');
   logs.push({ kind: 'nonce', latestNonce, pendingNonce, compNonceChosen });
   if (pendingNonce > latestNonce) {
-    logs.push({ kind: 'warn', msg: 'pending nonce > latest nonce → 공개 mempool 대기 tx 존재(경쟁 가능성 높음)' });
+    logs.push({ kind: 'warn', msg: 'pending nonce > latest nonce → 공개 mempool 대기 tx 존재(경쟁 가능성)' });
   }
 
-  // 2) 토큰 상태/리스크
   let decimals = 18, bal = null, paused = undefined, black1 = undefined, black2 = undefined;
   try { decimals = await token.decimals(); } catch {}
   try { bal = await token.balanceOf(from); } catch {}
-
   paused = await safeReadBool(token, 'paused');
   black1 = await safeReadBool(token, 'isBlacklisted', [from]);
   black2 = (black1 === undefined) ? await safeReadBool(token, 'isBlackListed', [from]) : undefined;
@@ -199,7 +223,6 @@ async function diagnoseEnvironment({
     isBlacklisted: black1 !== undefined ? black1 : black2,
   });
 
-  // 3) callStatic으로 사전 리버트 체크
   try {
     await token.callStatic.transfer(to, amountUnits, { from });
     logs.push({ kind: 'callStatic', ok: true });
@@ -207,7 +230,6 @@ async function diagnoseEnvironment({
     logs.push({ kind: 'callStatic', ok: false, reason: decodeRevert(e) });
   }
 
-  // 4) (옵션) 동일 nonce 경쟁 tx 스니핑 (5초)
   if (wsProvider && typeof wsProvider.on === 'function') {
     const seen = [];
     let count = 0;
@@ -238,9 +260,7 @@ async function diagnoseEnvironment({
     logs.push({ kind: 'watch', msg: 'wsProvider 없음 → pending 스니핑 스킵' });
   }
 
-  // 5) 참고 정보
   logs.push({ kind: 'gasHint', gasLimit: gasLimit.toString(), extraFundEth });
-
   console.log('[DIAG]', JSON.stringify(logs, null, 2));
   return logs;
 }
@@ -248,8 +268,8 @@ async function diagnoseEnvironment({
 /** ---------- 메인 함수 ---------- */
 async function rescueBundle({
   provider,
-  wsProvider,          // 선택: WebSocketProvider (mempool 진단용)
-  relayUrl,
+  wsProvider,          // optional: WebSocketProvider (mempool 진단용)
+  relayUrl = process.env.RELAY_URL || 'https://relay.flashbots.net',
   authWallet,
   sponsorWallet,
   compromisedWallet,
@@ -263,17 +283,14 @@ async function rescueBundle({
   blocksToTry = 30,
   simulateRetries = 1,
   sendRetries = 2,
-  reSignEachAttempt = true,
 }) {
   if (!provider || !relayUrl || !authWallet || !sponsorWallet || !compromisedWallet) {
     throw new Error('provider/relayUrl/authWallet/sponsorWallet/compromisedWallet are required');
   }
 
-  // 멀티 릴레이 목록 로깅
-const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
+  const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
   console.log('[RELAYS]', { flashbots: relayUrl, extraRelays });
 
-  // 네트워크/릴레이 체크
   const { chainId, name } = await provider.getNetwork();
   console.log('[NET] chainId=%d name=%s relay=%s', chainId, name, relayUrl);
   if (relayUrl.includes('flashbots.net') && chainId !== 1) {
@@ -282,7 +299,7 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
 
   const token = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
 
-  // 금액 단위 정리
+  // 금액 단위
   let finalAmountUnits = amountUnits ? bn(amountUnits) : null;
   if (!finalAmountUnits && typeof amountHuman !== 'undefined') {
     const decimals = await token.decimals();
@@ -292,28 +309,25 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
 
   const data = token.interface.encodeFunctionData('transfer', [toAddress, finalAmountUnits]);
 
-  // 가스 한도 (일시 1.5x 버퍼로 OOG 가능성 제거)
+  // 가스 한도 (1.3x 버퍼 권장)
   let gasLimit;
   try {
     const est = await provider.estimateGas({ from: compromisedWallet.address, to: tokenAddress, data });
-    gasLimit = bn(est).mul(150).div(100);
+    gasLimit = bn(est).mul(130).div(100);
     console.log('[GASLIMIT_TEST]', est.toString(), '->', gasLimit.toString());
   } catch {
     gasLimit = bn(gasLimitHint);
   }
 
-  // 논스
   const compNonce = await provider.getTransactionCount(compromisedWallet.address, 'pending');
   const sponsorNonce = await provider.getTransactionCount(sponsorWallet.address, 'pending');
   console.log('[NONCE] compNonce=%d sponsorNonce=%d', compNonce, sponsorNonce);
 
-  // 논스 quick check
   const latestNonce  = await provider.getTransactionCount(compromisedWallet.address, 'latest');
   const pendingNonce = await provider.getTransactionCount(compromisedWallet.address, 'pending');
   console.log('[NONCE_CHECK] latest=%d pending=%d delta=%d ourNonce=%d',
     latestNonce, pendingNonce, (pendingNonce - latestNonce), compNonce);
 
-  // 원인 진단
   await diagnoseEnvironment({
     provider,
     wsProvider,
@@ -326,10 +340,8 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
     extraFundEth,
   });
 
-  // Flashbots provider
   const fb = await FlashbotsBundleProvider.create(provider, authWallet, relayUrl);
 
-  // Tx 빌더
   const makeTokenTx = (curMaxFee, curTip) => ({
     to: tokenAddress,
     data,
@@ -352,7 +364,6 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
     chainId,
   });
 
-  // 사전 로그 + tip cap 계산
   const sponsorBal = await provider.getBalance(sponsorWallet.address);
   const compBal = await provider.getBalance(compromisedWallet.address);
   console.log('[PRECHECK] sponsor=%s bal=%s, compromised=%s bal=%s',
@@ -370,7 +381,6 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
     return { status: 'insufficient_sponsor_balance_for_any_tip', detail: { sponsorBal: ethers.utils.formatEther(sponsorBal), tipCapGwei: tipCapNum } };
   }
 
-  // cap의 90% / 100%만 시도(상단 집중)
   const tipCandidates = Array.from(new Set([
     Math.max(1, Math.floor(tipCapNum * 0.90)),
     tipCapNum
@@ -381,15 +391,14 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
   let lastError = null;
 
   for (let i = 1; i <= blocksToTry; i++) {
-    // 타깃 블록 2개(현재+2, 현재+3) 동시 시도
     const currentBlock = await provider.getBlockNumber();
-    const targets = [currentBlock + 2, currentBlock + 3];
+    const targets = [currentBlock + 2, currentBlock + 3, currentBlock + 4]; // 3개 블록 리드
 
     for (const targetBlock of targets) {
       const entry = { targetBlock, tries: [] };
 
       for (const tipStr of tipCandidates) {
-        // (1) 수수료 계산: base*1.3 + tip
+        // 수수료 계산: base*1.3 + tip
         const latestBlock = await provider.getBlock('latest');
         const baseCurr = bn(
           latestBlock?.baseFeePerGas ??
@@ -399,7 +408,6 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
         const candidateTip = ethers.utils.parseUnits(tipStr, 'gwei');
         const candidateMaxFee = baseCurr.mul(13).div(10).add(candidateTip);
 
-        // (2) 펀딩액 및 스폰서 확인
         const needWeiCandidate = candidateMaxFee.mul(gasLimit).add(extraFundWei);
         const sponsorBalNow = await provider.getBalance(sponsorWallet.address);
         const fundTxCostCeilCandidate = bn(21000).mul(candidateMaxFee);
@@ -409,7 +417,6 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
           continue;
         }
 
-        // (3) 트랜잭션 구성
         const tokenTxAttempt = makeTokenTx(candidateMaxFee, candidateTip);
         const fundTxAttempt  = makeFundTx(candidateMaxFee, candidateTip, needWeiCandidate);
 
@@ -421,7 +428,7 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
           needWei: ethers.utils.formatEther(needWeiCandidate)
         });
 
-        // (4) 번들 서명
+        // 번들 서명
         let signedAttempt;
         try {
           signedAttempt = await fb.signBundle([
@@ -435,7 +442,7 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
           continue;
         }
 
-        // (5) simulate (coinbaseDiff/에러 로깅)
+        // simulate
         try {
           const sim = await fb.simulate(signedAttempt, targetBlock);
           console.log('[SIM]', JSON.stringify(sim, null, 2).slice(0, 1200));
@@ -455,9 +462,15 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
           continue;
         }
 
-        // (6) 멀티 릴레이 병행 송신
+        // raw 번들
         const rawTxs = await buildRawBundleTxs(sponsorWallet, fundTxAttempt, compromisedWallet, tokenTxAttempt);
         const targetHex = '0x' + targetBlock.toString(16);
+
+        // (선택) bloXroute 경로 병행
+        const blxr = await sendBundleViaBloxroute({ rawTxs, targetBlockHex: targetHex });
+        if (blxr.used) console.log('[BLXR_SUMMARY]', { ok: blxr.ok, status: blxr.status });
+
+        // (참고용) 기타 릴레이 eth_sendBundle — 대부분 거부되므로 off해도 무방
         if (extraRelays.length) {
           const resMulti = await broadcastBundleToRelays({
             relays: extraRelays,
@@ -465,13 +478,10 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
             rawTxs,
             targetBlockHex: targetHex
           }).catch(() => []);
-          console.log(
-            '[MULTI-RELAY-SUMMARY]',
-            resMulti.map(r => ({ url: r.url, ok: r.ok, httpStatus: r.httpStatus }))
-          );
+          console.log('[MULTI-RELAY-SUMMARY]', resMulti.map(r => ({ url: r.url, ok: r.ok, httpStatus: r.httpStatus })));
         }
 
-        // (7) Flashbots 전송 + 대기
+        // Flashbots 전송 + 대기
         let respAttempt = null;
         for (let t = 1; t <= sendRetries; t++) {
           try {
@@ -510,13 +520,13 @@ const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
           entry.tries.push({ tip: tipStr, stage: 'wait', ok: false, msg: e?.message || String(e) });
           lastError = e;
         }
-      } // end for tipStr
+      } // tip loop
 
       attempts.push(entry);
-    } // end for targetBlock
+    } // targets loop
 
     console.log('[FINAL_BLOCK_ROUND] done round=%d', i);
-  } // end for i
+  } // blocksToTry loop
 
   return {
     status: 'not_included',
