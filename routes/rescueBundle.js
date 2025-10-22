@@ -43,7 +43,7 @@ async function broadcastBundleToRelays({ relays, authWallet, rawTxs, targetBlock
   const sig = await authWallet.signMessage(sigPayload);
   const signatureHeader = `${authWallet.address}:${sig}`;
 
-  const results = await Promise.allSettled(relays.map(async (url) => {
+  const settled = await Promise.allSettled(relays.map(async (url) => {
     try {
       const res = await doFetch(url, {
         method: 'POST',
@@ -55,15 +55,22 @@ async function broadcastBundleToRelays({ relays, authWallet, rawTxs, targetBlock
         body: JSON.stringify(body)
       });
       const text = await res.text();
-      return { url, ok: res.ok, status: res.status, body: text.slice(0, 300) };
+      return { url, ok: res.ok, httpStatus: res.status, body: text.slice(0, 300) };
     } catch (e) {
-      return { url, ok: false, status: 0, err: e?.message || String(e) };
+      return { url, ok: false, httpStatus: 0, err: e?.message || String(e) };
     }
   }));
 
-  console.log('[MULTI-RELAY]', results);
-  return results;
+  // ⚠️ 여기서 평탄화
+  const flat = settled.map(item =>
+    item.status === 'fulfilled' ? item.value
+                                : { url: '(unknown)', ok: false, httpStatus: 0, err: item.reason?.message || String(item.reason) }
+  );
+
+  console.log('[MULTI-RELAY]', flat);
+  return flat;
 }
+
 
 // revert reason 최대한 뽑아내기
 function decodeRevert(e) {
@@ -426,7 +433,10 @@ async function rescueBundle({
             rawTxs,
             targetBlockHex: targetHex
           }).catch(() => []);
-          console.log('[MULTI-RELAY-SUMMARY]', resMulti.map(r => ({ url: r.url, ok: r.ok, status: r.status })));
+          console.log(
+            '[MULTI-RELAY-SUMMARY]',
+            resMulti.map(r => ({ url: r.url, ok: r.ok, httpStatus: r.httpStatus }))
+          );
         }
 
         // (7) Flashbots 전송 + 대기
