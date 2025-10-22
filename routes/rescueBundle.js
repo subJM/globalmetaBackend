@@ -70,7 +70,40 @@ async function broadcastBundleToRelays({ relays, authWallet, rawTxs, targetBlock
   console.log('[MULTI-RELAY]', flat);
   return flat;
 }
-
+function normalizeRelayUrls(raw) {
+  return (raw || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    // credentials 제거: https://user@host → https://host
+    .map(u => {
+      try {
+        const url = new URL(u);
+        if (url.username || url.password) {
+          url.username = '';
+          url.password = '';
+          console.warn('[RELAYS] stripped credentials from', u, '=>', url.toString());
+        }
+        return url.toString();
+      } catch {
+        console.warn('[RELAYS] invalid url skipped:', u);
+        return null;
+      }
+    })
+    .filter(Boolean)
+    // 서처가 eth_sendBundle를 직접 칠 수 없는 도메인 제외(정보성)
+    .filter(u => {
+      const host = new URL(u).host;
+      const unsupported =
+        host.includes('blxrbdn.com') ||      // bloXroute는 blxr_submit_bundle 사용
+        host.includes('aestus.live') ||      // mev-boost relay (validator용)
+        host.includes('agnostic-relay.net'); // mev-boost relay (validator용)
+      if (unsupported) {
+        console.warn('[RELAYS] unsupported for eth_sendBundle (skipped):', u);
+      }
+      return !unsupported;
+    });
+}
 
 // revert reason 최대한 뽑아내기
 function decodeRevert(e) {
@@ -237,8 +270,7 @@ async function rescueBundle({
   }
 
   // 멀티 릴레이 목록 로깅
-  const extraRelays = (process.env.EXTRA_RELAYS || '')
-    .split(',').map(s => s.trim()).filter(Boolean);
+const extraRelays = normalizeRelayUrls(process.env.EXTRA_RELAYS);
   console.log('[RELAYS]', { flashbots: relayUrl, extraRelays });
 
   // 네트워크/릴레이 체크
