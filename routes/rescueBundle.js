@@ -281,8 +281,8 @@ async function rescueBundle({
   tipGwei = '5',
   extraFundEth = '0.00003',
   blocksToTry = 30,
-  simulateRetries = 1,
-  sendRetries = 2,
+  simulateRetries = 0,
+  sendRetries = 3,
 }) {
   if (!provider || !relayUrl || !authWallet || !sponsorWallet || !compromisedWallet) {
     throw new Error('provider/relayUrl/authWallet/sponsorWallet/compromisedWallet are required');
@@ -313,7 +313,8 @@ async function rescueBundle({
   let gasLimit;
   try {
     const est = await provider.estimateGas({ from: compromisedWallet.address, to: tokenAddress, data });
-    gasLimit = bn(est).mul(130).div(100);
+    // gasLimit = bn(est).mul(130).div(100);
+    gasLimit = bn(est).mul(120).div(100);
     console.log('[GASLIMIT_TEST]', est.toString(), '->', gasLimit.toString());
   } catch {
     gasLimit = bn(gasLimitHint);
@@ -380,11 +381,28 @@ async function rescueBundle({
   if (tipCapNum <= 0) {
     return { status: 'insufficient_sponsor_balance_for_any_tip', detail: { sponsorBal: ethers.utils.formatEther(sponsorBal), tipCapGwei: tipCapNum } };
   }
+  console.log('[CAP_DEBUG]', {
+    sponsorBal: ethers.utils.formatEther(sponsorBal),
+    totalGas: totalGas.toString(),
+    base13_gwei: ethers.utils.formatUnits(base13, 'gwei'),
+    extraFundEth,
+    fixedPartEth: ethers.utils.formatEther(fixedPartWei),
+    capGwei: tipCapNum
+  });
 
+  // const tipCandidates = Array.from(new Set([
+  //   Math.max(1, Math.floor(tipCapNum * 0.90)),
+  //   tipCapNum
+  // ])).map(String);
+  // 변경 (4단계 램프: 85%, 92%, 97%, 100%)
   const tipCandidates = Array.from(new Set([
-    Math.max(1, Math.floor(tipCapNum * 0.90)),
+    Math.max(1, Math.ceil(tipCapNum * 0.85)),
+    Math.max(1, Math.ceil(tipCapNum * 0.92)),
+    Math.max(1, Math.ceil(tipCapNum * 0.97)),
     tipCapNum
-  ])).map(String);
+  ]))  // 높은 쪽 먼저 쏘도록 정렬
+    .sort((a,b) => b - a)
+    .map(String);
   console.log('[TIP_CANDIDATES]', tipCandidates);
 
   const attempts = [];
@@ -392,7 +410,8 @@ async function rescueBundle({
 
   for (let i = 1; i <= blocksToTry; i++) {
     const currentBlock = await provider.getBlockNumber();
-    const targets = [currentBlock + 2, currentBlock + 3, currentBlock + 4]; // 3개 블록 리드
+    // const targets = [currentBlock + 2, currentBlock + 3, currentBlock + 4]; // 3개 블록 리드
+    const targets = [2,3,4,5,6].map(off => currentBlock + off);
 
     for (const targetBlock of targets) {
       const entry = { targetBlock, tries: [] };
