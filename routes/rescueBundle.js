@@ -312,9 +312,10 @@ async function rescueBundle({
   // 가스 한도 (1.3x 버퍼 권장)
   let gasLimit;
   try {
+    // 기존 1.3x → 1.2x로 조정
     const est = await provider.estimateGas({ from: compromisedWallet.address, to: tokenAddress, data });
-    // gasLimit = bn(est).mul(130).div(100);
     gasLimit = bn(est).mul(120).div(100);
+    console.log('[GASLIMIT_TEST]', est.toString(), '->', gasLimit.toString());
     console.log('[GASLIMIT_TEST]', est.toString(), '->', gasLimit.toString());
   } catch {
     gasLimit = bn(gasLimitHint);
@@ -374,43 +375,70 @@ async function rescueBundle({
 
   const { base } = await buildFees(provider, tipGwei);
   console.log('[FEE_HINT] base≈%s gwei', ethers.utils.formatUnits(base, 'gwei'));
+// === cap 계산/로그 (여기서 totalGas 반드시 선언) ===
+const extraFundWei = ethers.utils.parseEther(String(extraFundEth));
 
-  const extraFundWei = ethers.utils.parseEther(String(extraFundEth));
-  const maxTipGweiCap = computeMaxTipGweiCap({ sponsorBalWei: sponsorBal, baseWei: base, gasLimit, extraFundWei });
-  const tipCapNum = Number(maxTipGweiCap.toString());
-  if (tipCapNum <= 0) {
-    return { status: 'insufficient_sponsor_balance_for_any_tip', detail: { sponsorBal: ethers.utils.formatEther(sponsorBal), tipCapGwei: tipCapNum } };
-  }
-  console.log('[CAP_DEBUG]', {
-    sponsorBal: ethers.utils.formatEther(sponsorBal),
-    totalGas: totalGas.toString(),
-    base13_gwei: ethers.utils.formatUnits(base13, 'gwei'),
-    extraFundEth,
-    fixedPartEth: ethers.utils.formatEther(fixedPartWei),
-    capGwei: tipCapNum
-  });
+// 총 가스(토큰 tx + 펀드 tx의 21,000) — 상한 계산에 사용
+const totalGas = gasLimit.add(bn(21000));
+// base * 1.3 (상한 계산에 쓰는 보수값)
+const base13 = base.mul(13).div(10);
+
+// “고정비” = (totalGas * base*1.3) + extraFund
+const fixedPartWei = totalGas.mul(base13).add(extraFundWei);
+
+// cap 계산
+const maxTipGweiCap = computeMaxTipGweiCap({
+  sponsorBalWei: sponsorBal,
+  baseWei: base,
+  gasLimit,
+  extraFundWei
+});
+const tipCapNum = Number(maxTipGweiCap.toString());
+
+console.log('[CAP_DEBUG]', {
+  sponsorBal: ethers.utils.formatEther(sponsorBal),
+  gasLimit: gasLimit.toString(),
+  totalGas: totalGas.toString(),
+  base13_gwei: ethers.utils.formatUnits(base13, 'gwei'),
+  extraFundEth,
+  fixedPartEth: ethers.utils.formatEther(fixedPartWei),
+  capGwei: tipCapNum
+});
+
+if (tipCapNum <= 0) {
+  return {
+    status: 'insufficient_sponsor_balance_for_any_tip',
+    detail: {
+      sponsorBal: ethers.utils.formatEther(sponsorBal),
+      tipCapGwei: tipCapNum
+    }
+  };
+}
+
+// tip 후보 4단계 (상위값 먼저 시도)
+const tipCandidates = Array.from(new Set([
+  Math.max(1, Math.ceil(tipCapNum * 0.85)),
+  Math.max(1, Math.ceil(tipCapNum * 0.92)),
+  Math.max(1, Math.ceil(tipCapNum * 0.97)),
+  tipCapNum
+]))
+  .sort((a, b) => b - a)
+  .map(String);
+
+console.log('[TIP_CAP]', { capGwei: tipCapNum, tipCandidates });
+
 
   // const tipCandidates = Array.from(new Set([
   //   Math.max(1, Math.floor(tipCapNum * 0.90)),
   //   tipCapNum
   // ])).map(String);
   // 변경 (4단계 램프: 85%, 92%, 97%, 100%)
-  const tipCandidates = Array.from(new Set([
-    Math.max(1, Math.ceil(tipCapNum * 0.85)),
-    Math.max(1, Math.ceil(tipCapNum * 0.92)),
-    Math.max(1, Math.ceil(tipCapNum * 0.97)),
-    tipCapNum
-  ]))  // 높은 쪽 먼저 쏘도록 정렬
-    .sort((a,b) => b - a)
-    .map(String);
-  console.log('[TIP_CANDIDATES]', tipCandidates);
 
   const attempts = [];
   let lastError = null;
 
   for (let i = 1; i <= blocksToTry; i++) {
     const currentBlock = await provider.getBlockNumber();
-    // const targets = [currentBlock + 2, currentBlock + 3, currentBlock + 4]; // 3개 블록 리드
     const targets = [2,3,4,5,6].map(off => currentBlock + off);
 
     for (const targetBlock of targets) {
