@@ -166,7 +166,7 @@ router.post('/recreate/account', async function(req, res, next) {
   }
 });
 
-router.post('/getTronAddress', async function (req, res, next) {
+router.post('/getAddress', async function (req, res, next) {
   try {
     const user_id = req.body.user_id;
     // 비동기 방식으로 파일 읽기

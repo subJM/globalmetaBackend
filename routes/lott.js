@@ -157,7 +157,7 @@ router.post('/create_account', async function (req, res, next) {
 
 
 //이더 지갑주소 가져오기
-router.post('/getEthAddress' , async function (req, res) {
+router.post('/getAddress' , async function (req, res) {
   try {
     const user_id = req.body.user_id;
     // 비동기 방식으로 파일 읽기
