@@ -32,7 +32,7 @@ const eventServer = 'https://nile.trongrid.io';
 // const EVCtokenContractAddress = "TNmtt9SBLsHmzAUvdwsbnH2aK4Gbnocagy";
 
 //Win 테스트 토큰 주소
-const EVCtokenContractAddress = "TNDSHKGBmgRx9mDYA9CnxPx55nu672yQw2 ";
+const EVCtokenContractAddress = "TNDSHKGBmgRx9mDYA9CnxPx55nu672yQw2";
 
 /* GET home page. */
 // const privateKey = await fs.readFileSync(`./user/${user_id}/privateKey`, 'utf8');
