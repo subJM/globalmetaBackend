@@ -98,89 +98,85 @@ router.post('/create_account', async function (req, res, next) {
   }
 });
 
-
-router.post('/recreate/account', async function(req, res, next) {
-  const user_id = req.body.user_id;
+router.post('/recreate/account', async (req, res) => {
+  const user_id  = String(req.body.user_id  || '').replace(/[^\w.-]/g, '');
   const user_srl = req.body.user_srl;
+  const filePath = path.join(__dirname, `./user/${user_id}/TRON/address`);
 
   try {
-    // TronWeb 인스턴스 생성
     const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
-    const filePath = path.join(__dirname, `./user/${user_id}/TRON/address`);
-    console.log("recreate/account");
-    if (!fs.existsSync(filePath)) {
-      const account = tronWeb.createAccount();
-      account.then( async (account_result) => {
-          await makeKeyFile(user_id, account_result.address.base58,'address');
-          await makeKeyFile(user_id, account_result.address.hex,'hex');
-          await makeKeyFile(user_id, account_result.publicKey,'publicKey');
-          await makeKeyFile(user_id, account_result.privateKey,'privateKey');
+    console.log('recreate/account');
 
-          var user_account ={};
-          user_account.user_srl = user_srl;
-          user_account.wallet = 'TRON';
-          user_account.token_name = 'TRON';
-          user_account.address = account_result.address.base58;
-          console.log(user_account);
-
-          await checkAddress(user_account, async( error, results)=>{
-            if(results.length > 0){
-              await updateWalletAccount(user_account, async (error, results) => {
-                if (error) {
-                  res.status(500).send(error);
-                }
-              });
-            }else{
-              await insertDB('walletinfo', user_account, async (error, results) => {
-                if (error) {
-                  res.status(500).send(error);
-                }
-              });
-            }
-          });
-          var user_token_account = {};
-          user_token_account.user_srl = user_srl;
-          user_token_account.wallet = 'TRON';
-          user_token_account.token_name = 'LOTT';
-          user_token_account.address = account_result.address.base58;
-
-          await checkAddress(user_token_account, async( error, results)=>{
-            if(results.length > 0){
-              await updateWalletAccount(user_token_account, async (error, results) => {
-                if (error) {
-                  res.status(500).send(error);
-                }
-              });
-            }else{
-              await insertDB('walletinfo', user_token_account, async (error, results) => {
-                if (error) {
-                  res.status(500).send(error);
-                }
-              });
-            }
-          });
-          res.status(201).send({result: "success" , address: account_result.address.base58});
-      });
-    } else {
-      console.log(`${keyType} 파일이 이미 존재합니다.`);
+    // 이미 주소 파일이 있으면 그대로 반환
+    if (fs.existsSync(filePath)) {
+      const addr = fs.readFileSync(filePath, 'utf8').trim();
+      return res.status(200).send({ result: 'exists', address: addr || null });
     }
+
+    // 신규 계정 생성
+    const account = await tronWeb.createAccount(); // Promise를 await로
+    const base58   = account.address.base58;
+    const hex      = account.address.hex;
+    const pubKey   = account.publicKey;
+    const privKey  = account.privateKey;
+
+    // 키 파일 저장 (makeKeyFile이 Promise 반환하도록 구현되어 있어야 함)
+    await makeKeyFile(user_id, base58,  'address');
+    await makeKeyFile(user_id, hex,     'hex');
+    await makeKeyFile(user_id, pubKey,  'publicKey');
+    await makeKeyFile(user_id, privKey, 'privateKey');
+
+    // DB upsert 유틸: 존재하면 update, 없으면 insert
+    const upsertWallet = async (payload) => {
+      const exists = await new Promise((resolve, reject) => {
+        checkAddress(payload, (err, results) => err ? reject(err) : resolve(results?.length > 0));
+      });
+      if (exists) {
+        await new Promise((resolve, reject) => {
+          updateWalletAccount(payload, (err) => err ? reject(err) : resolve());
+        });
+      } else {
+        await new Promise((resolve, reject) => {
+          insertDB('walletinfo', payload, (err) => err ? reject(err) : resolve());
+        });
+      }
+    };
+
+    // TRON / LOTT 두 레코드 upsert
+    await upsertWallet({
+      user_srl, wallet: 'TRON', token_name: 'TRON', address: base58,
+    });
+    await upsertWallet({
+      user_srl, wallet: 'TRON', token_name: 'LOTT', address: base58,
+    });
+
+    return res.status(201).send({ result: 'success', address: base58 });
   } catch (error) {
-    console.log('error: ' + error);
+    console.error('recreate/account error:', error);
+    return res.status(500).send({ result: 'error', message: 'recreate failed' });
   }
 });
 
-router.post('/getAddress', async function (req, res, next) {
+
+router.post('/getAddress', async (req, res) => {
   try {
-    const user_id = req.body.user_id;
-    // 비동기 방식으로 파일 읽기
-    const address = fs.readFileSync(`./user/${user_id}/TRON/address`, 'utf8');
-    // const address = decryptPrivateKey(key);
-    res.status(201).send({ address: address });
+    const user_id = String(req.body.user_id || '').replace(/[^\w.-]/g, '');
+    const filePath = path.join(__dirname, `./user/${user_id}/TRON/address`);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(200).send({ address: null }); // 파일 없음 = 정상 응답
+    }
+
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const address = (raw || '').trim() || null; // 빈 문자열도 null 처리
+    return res.status(200).send({ address });
   } catch (error) {
-    console.error('Error reading address file:', error);
-    // 파일을 읽는 중 에러가 발생하면 500 상태 코드를 클라이언트로 전송
-    res.status(500).send({ result: 'error', message: 'Failed to read address file' });
-    // 또는 next(error)로 에러 처리 미들웨어로 전달
+    console.error('getAddress error:', error);
+    // ENOENT만 특별 취급하고 나머지는 서버 에러
+    if (error.code === 'ENOENT') {
+      return res.status(200).send({ address: null });
+    }
+    return res.status(500).send({ result: 'error', message: 'Failed to read address file' });
   }
 });
 
