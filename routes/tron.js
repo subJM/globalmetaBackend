@@ -16,15 +16,15 @@ const TronWeb = require('tronweb');
 
 
 // TESTNET (Nile)
-const fullNode = 'https://nile.trongrid.io';
-const solidityNode = 'https://nile.trongrid.io';
-const eventServer = 'https://nile.trongrid.io';
+// const fullNode = 'https://nile.trongrid.io';
+// const solidityNode = 'https://nile.trongrid.io';
+// const eventServer = 'https://nile.trongrid.io';
 
 // Tron 노드 URL 설정
-// const fullNode = 'https://api.trongrid.io'; // 메인넷 노드
-// const solidityNode = 'https://api.trongrid.io'; // 메인넷 솔리디티 노드
-// const eventServer = 'https://api.trongrid.io'; // 메인넷 이벤트 서버
-// const tronapikey = '882abac6-31cd-4bb4-8587-ae84d84f8a5b'; // 메인넷 이벤트 서버
+const fullNode = 'https://api.trongrid.io'; // 메인넷 노드
+const solidityNode = 'https://api.trongrid.io'; // 메인넷 솔리디티 노드
+const eventServer = 'https://api.trongrid.io'; // 메인넷 이벤트 서버
+const tronapikey = '882abac6-31cd-4bb4-8587-ae84d84f8a5b'; // 메인넷 이벤트 서버
 
 // TronWeb 인스턴스 생성
 // const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
@@ -32,7 +32,10 @@ const eventServer = 'https://nile.trongrid.io';
 // const EVCtokenContractAddress = "TNmtt9SBLsHmzAUvdwsbnH2aK4Gbnocagy";
 
 //Win 테스트 토큰 주소
-const EVCtokenContractAddress = "TNDSHKGBmgRx9mDYA9CnxPx55nu672yQw2";
+// const EVCtokenContractAddress = "TNDSHKGBmgRx9mDYA9CnxPx55nu672yQw2";
+
+// LOTT 토큰 주소
+const EVCtokenContractAddress = "TVfuBgFnMHMPRadR9d9pStvTvttBmBrf51";
 
 /* GET home page. */
 // const privateKey = await fs.readFileSync(`./user/${user_id}/privateKey`, 'utf8');
@@ -77,7 +80,7 @@ router.post('/create_account', async function (req, res, next) {
       {
         user_srl: userResults.insertId,
         wallet: 'TRON',
-        token_name: 'WIN',
+        token_name: 'LOTT',
         address: account_result.address.base58,
       },
     ];
@@ -138,7 +141,7 @@ router.post('/recreate/account', async function(req, res, next) {
           var user_token_account = {};
           user_token_account.user_srl = user_srl;
           user_token_account.wallet = 'TRON';
-          user_token_account.token_name = 'WIN';
+          user_token_account.token_name = 'LOTT';
           user_token_account.address = account_result.address.base58;
 
           await checkAddress(user_token_account, async( error, results)=>{
@@ -233,7 +236,7 @@ router.post('/getAddressTokenBalance', async function(req, res, next) {
     const decimals = 6; // 토큰의 소수점 자릿수
     const decimalBalance = new BigNumber(balance.toString()).dividedBy(new BigNumber(10).pow(decimals)).toString();
 
-    console.log('WIN Balance:', decimalBalance);
+    console.log('LOTT Balance:', decimalBalance);
 
     // 성공 응답 반환
     res.status(200).send({ result: 'success', balance: decimalBalance });
@@ -639,7 +642,7 @@ router.post('/removePendingTransaction', function (req, res) {
 // 수동 송금 내역 확인 및 일괄 업데이트
 router.get('/checkTransactionStatus', async function (req, res) {
   try {
-    var coinList = ["TRON","WIN"];
+    var coinList = ["TRON","LOTT"];
     // var coinList = ["tron"];
     const delay = 300; // 요청 간 200ms 지연 (초당 약 5개 요청)
 
@@ -706,7 +709,7 @@ router.get('/statusManager', async function (req, res) {
 
 async function statusManager(){
   try {
-    var coinList = ["TRON","WIN"];
+    var coinList = ["TRON","LOTT"];
     // var coinList = ["tron"];
     const delay = 300; // 요청 간 200ms 지연 (초당 약 5개 요청)
 
@@ -1123,7 +1126,7 @@ async function expectEnergy(user_id, address, to_address, amount, coin_name) {
        bandwidthDeficit,
        trxCost,
      };
-    } else if (coin_name === 'WIN') {
+    } else if (coin_name === 'LOTT') {
       // TRC-20 토큰 전송 에너지 계산
       console.log("Estimating energy for TRC-20 transfer...");
 
