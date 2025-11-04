@@ -19,6 +19,7 @@ const TronWeb = require('tronweb');
 // const fullNode = 'https://nile.trongrid.io';
 // const solidityNode = 'https://nile.trongrid.io';
 // const eventServer = 'https://nile.trongrid.io';
+// const tronapikey = 'https://nile.trongrid.io';
 
 // Tron 노드 URL 설정
 const fullNode = 'https://api.trongrid.io'; // 메인넷 노드
