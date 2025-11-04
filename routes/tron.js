@@ -1140,7 +1140,7 @@ async function expectEnergy(user_id, address, to_address, amount, coin_name) {
   try {
     const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8').trim();
     const tronWeb = new TronWeb({
-      fullHost: 'https://api.trongrid.io',
+      fullHost: fullNode,
       headers: { 'TRON-PRO-API-KEY': tronapikey },
       privateKey: privateKey,
     });
