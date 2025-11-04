@@ -320,7 +320,7 @@ router.post('/transfer', async function(req, res, next) {
 
   try {
     const tronWeb = new TronWeb({
-      fullHost: 'https://api.trongrid.io',
+      fullHost: fullNode,
       headers: { 'TRON-PRO-API-KEY': tronapikey },
       privateKey,
     });
@@ -386,7 +386,7 @@ router.post('/transferToken', async function (req, res) {
 
   try {
     const tronWeb = new TronWeb({
-      fullHost: 'https://api.trongrid.io',
+      fullHost: fullNode,
       headers: { 'TRON-PRO-API-KEY': tronapikey },
       privateKey,
     });
@@ -931,7 +931,7 @@ router.post('/staking', async function (req, res) {
     }
 
     const tronWeb = new TronWeb({
-      fullHost: 'https://api.trongrid.io',
+      fullHost: fullNode,
       headers: { 'TRON-PRO-API-KEY': tronapikey },
       privateKey: privateKey
     });
@@ -986,7 +986,7 @@ router.get('/stakingtest2', async function (req, res) {
   const address = "TNAoUphvyDWZiVnBjivZzoeJZLKUpqHj4D";
 
   const tronWeb = new TronWeb({
-    fullHost: 'https://api.trongrid.io',
+    fullHost: fullNode,
     headers: { 'TRON-PRO-API-KEY': tronapikey },
     privateKey: privateKey
   });
@@ -1040,7 +1040,7 @@ router.get('/checkStaking', async function (req, res) {
     const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8');
 
     const tronWeb = new TronWeb({
-      fullHost: 'https://api.trongrid.io',
+      fullHost: fullNode,
       headers: { 'TRON-PRO-API-KEY': tronapikey },
       privateKey: privateKey
     });
@@ -1087,7 +1087,7 @@ router.get('/stakingtest4', async function (req, res) {
   const address = "TNAoUphvyDWZiVnBjivZzoeJZLKUpqHj4D";
   const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8');
   const tronWeb = new TronWeb({
-    fullHost: 'https://api.trongrid.io',
+    fullHost: fullNode,
     headers: { 'TRON-PRO-API-KEY': '882abac6-31cd-4bb4-8587-ae84d84f8a5b' },
     privateKey: privateKey
   });
@@ -1102,7 +1102,7 @@ async function unfreezeTRX(resourceType = "ENERGY") {
     const address = "TNAoUphvyDWZiVnBjivZzoeJZLKUpqHj4D";
     const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8');
     const tronWeb = new TronWeb({
-      fullHost: 'https://api.trongrid.io',
+      fullHost: fullNode,
       headers: { 'TRON-PRO-API-KEY': tronapikey },
       privateKey,
     });
@@ -1273,7 +1273,7 @@ async function getStakingAmount(user_id , address) {
   try {
     const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8').trim();
     const tronWeb = new TronWeb({
-      fullHost: 'https://api.trongrid.io',
+      fullHost: fullNode,
       headers: { 'TRON-PRO-API-KEY': tronapikey },
       privateKey: privateKey,
     });
