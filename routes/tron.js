@@ -1185,7 +1185,7 @@ async function expectEnergy(user_id, address, to_address, amount, coin_name) {
        bandwidthDeficit,
        trxCost,
      };
-    } else if (coin_name === 'LOTT') {
+    } else if (coin_name === 'LOTT' || coin_name ===  "WIN") {
       // TRC-20 토큰 전송 에너지 계산
       console.log("Estimating energy for TRC-20 transfer...");
 
@@ -1238,13 +1238,6 @@ async function expectEnergy(user_id, address, to_address, amount, coin_name) {
         energyDeficit: energyDeficit,
         trxCost: trxCost,
       };
-    } else if(coin_name ===  "WIN"){
-      return {
-        estimatedEnergy: 5,
-        availableEnergy: 5,
-        energyDeficit: 5,
-        trxCost: 5,
-      }
     
     }else {
       throw new Error("Unsupported coin type.");
