@@ -476,29 +476,40 @@ router.get('/tron/getBalance',  function(req, res, next) {
   });
 });
 
+
 async function makeKeyFile(user_id, content, fileName) {
-  // 디렉토리 존재 확인
-  const dirPath = `./user/${user_id}/TRON`;
+  const dirPath = path.join('./user', String(user_id), 'TRON');
+
+  // 디렉토리 생성(없으면)
   if (!fs.existsSync(dirPath)) {
-      try {
-          fs.mkdirSync(dirPath, { recursive: true });
-      } catch (err) {
-          console.error('디렉토리 생성 중 오류 발생:', err);
-          throw err; // 에러를 호출자에게 전달
-      }
+    try {
+      fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 }); // 디렉토리 권한 최소화
+    } catch (err) {
+      console.error('디렉토리 생성 중 오류:', err);
+      throw err;
+    }
   }
 
-  // 파일 생성
+  // 파일 경로(경로 탈출 방지)
+  const safeName = path.basename(fileName);
+  const filePath = path.join(dirPath, safeName);
+
+  // 존재하면 실패(EEXIST) → 덮어쓰기 방지
   try {
-      fs.writeFileSync(`${dirPath}/${fileName}`, content);
-      console.log('파일이 성공적으로 생성되었습니다.');
-      return "SUCCESS";
+    fs.writeFileSync(filePath, content, { flag: 'wx', mode: 0o600 });
+    console.log('파일이 성공적으로 생성되었습니다.');
+    return 'SUCCESS';
   } catch (err) {
-      console.error('파일 쓰기 중 오류 발생:', err);
-      throw err; // 에러를 호출자에게 전달
+    if (err.code === 'EEXIST') {
+      console.error('파일이 이미 존재합니다. 덮어쓰지 않습니다:', filePath);
+      // 필요하면 여기서 'EXISTS'를 리턴하거나 throw로 상위에서 분기 처리
+      return 'EXISTS';
+      // 또는: throw new Error('Key file already exists');
+    }
+    console.error('파일 쓰기 중 오류:', err);
+    throw err;
   }
 }
-
 
 router.post('/getTokenList', function(req, res, next) {
   try {
