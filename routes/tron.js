@@ -101,14 +101,15 @@ router.post('/create_account', async function (req, res, next) {
 router.post('/recreate/account', async (req, res) => {
   const user_id  = String(req.body.user_id  || '').replace(/[^\w.-]/g, '');
   const user_srl = req.body.user_srl;
-  const filePath = path.join(__dirname, `./user/${user_id}/TRON/address`);
+  const DATA_ROOT = process.env.USER_DATA_DIR || path.resolve(__dirname, '..', 'user');
+  const filePath = path.join(DATA_ROOT, `./${user_id}/TRON/address`);
 
   try {
     const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
     console.log('recreate/account');
 
     // 이미 주소 파일이 있으면 그대로 반환
-    if (fs.existsSync(filePath)) {
+    if (!fs.existsSync(filePath)) {
       const addr = fs.readFileSync(filePath, 'utf8').trim();
       return res.status(200).send({ result: 'exists', address: addr || null });
     }
@@ -161,7 +162,8 @@ router.post('/recreate/account', async (req, res) => {
 router.post('/getAddress', async (req, res) => {
   try {
     const user_id = String(req.body.user_id || '').replace(/[^\w.-]/g, '');
-    const filePath = path.join(__dirname, `./user/${user_id}/TRON/address`);
+    const DATA_ROOT = process.env.USER_DATA_DIR || path.resolve(__dirname, '..', 'user');
+    const filePath = path.join(DATA_ROOT, `./${user_id}/TRON/address`);
 
     if (!fs.existsSync(filePath)) {
       return res.status(200).send({ address: null }); // 파일 없음 = 정상 응답
