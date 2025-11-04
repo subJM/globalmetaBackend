@@ -390,7 +390,7 @@ router.post('/transferToken', async function (req, res) {
   });
 
   if (!rows || rows.length === 0) {
-    return res.status(403).send({
+    return res.status(200).send({
       result: 'error',
       message: '외부 출금은 불가합니다. 내부 지갑(등록된 주소)으로만 전송할 수 있습니다.'
     });
