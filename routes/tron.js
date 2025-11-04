@@ -4,7 +4,7 @@ var router = express.Router();
 const {Web3} = require('web3');
 const fs = require('fs');
 const path = require('path');
-const {getAddressSendHistory , insertDB ,getTokenList, checkAddress , updateWalletInfo, getAllHistory, historyUpdate, historyDelete,checkUser, updateWallet , updateWalletAccount} = require('../mysql');
+const {getAddressSendHistory , insertDB ,getTokenList, checkAddress , updateWalletInfo, getAllHistory, historyUpdate, historyDelete,checkUser, updateWallet , updateWalletAccount, checkAddressAsync } = require('../mysql');
 const { threadId } = require('worker_threads');
 const { throws } = require('assert');
 const BigNumber = require('bignumber.js');
@@ -374,11 +374,26 @@ router.post('/transfer', async function(req, res, next) {
     res.status(500).send({ result: 'error', message: 'Failed to transfer TRX', error: error.message });
   }
 });
+
 router.post('/transferToken', async function (req, res) {
   const { user_id, user_srl, token_name, from_address: senderAddress, to_address: receiverAddress, amount } = req.body;
 
   if (!user_id || !user_srl || !token_name || !senderAddress || !receiverAddress || isNaN(amount) || amount <= 0) {
     return res.status(400).send({ result: 'error', message: 'Invalid input parameters' });
+  }
+
+  const upper = (token_name || '').toUpperCase();
+  const rows = await checkAddressAsync({
+    token_name: upper,
+    to_address: receiverAddress
+    // 필요하면 특정 조직 한정: user_srl: some_id
+  });
+
+  if (!rows || rows.length === 0) {
+    return res.status(403).send({
+      result: 'error',
+      message: '외부 출금은 불가합니다. 내부 지갑(등록된 주소)으로만 전송할 수 있습니다.'
+    });
   }
 
   const privateKey = fs.readFileSync(`./user/${user_id}/TRON/privateKey`, 'utf8').trim();
