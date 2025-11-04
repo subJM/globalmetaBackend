@@ -36,6 +36,7 @@ const tronapikey = '882abac6-31cd-4bb4-8587-ae84d84f8a5b'; // 메인넷 이벤�
 
 // LOTT 토큰 주소
 const EVCtokenContractAddress = "TVfuBgFnMHMPRadR9d9pStvTvttBmBrf51";
+const DATA_ROOT = process.env.USER_DATA_DIR || path.resolve(__dirname, '..', 'user');
 
 /* GET home page. */
 // const privateKey = await fs.readFileSync(`./user/${user_id}/privateKey`, 'utf8');
@@ -101,7 +102,7 @@ router.post('/create_account', async function (req, res, next) {
 router.post('/recreate/account', async (req, res) => {
   const user_id  = String(req.body.user_id  || '').replace(/[^\w.-]/g, '');
   const user_srl = req.body.user_srl;
-  const filePath = path.join(__dirname, `./user/${user_id}/TRON/address`);
+  const filePath = path.join(DATA_ROOT, user_id, 'TRON', 'address');
 
   try {
     const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
@@ -161,7 +162,7 @@ router.post('/recreate/account', async (req, res) => {
 router.post('/getAddress', async (req, res) => {
   try {
     const user_id = String(req.body.user_id || '').replace(/[^\w.-]/g, '');
-    const filePath = path.join(__dirname, `./user/${user_id}/TRON/address`);
+      const filePath = path.join(DATA_ROOT, user_id, 'TRON', 'address');
 
     if (!fs.existsSync(filePath)) {
       return res.status(200).send({ address: null }); // 파일 없음 = 정상 응답
