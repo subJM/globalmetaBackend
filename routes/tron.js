@@ -202,45 +202,98 @@ router.post('/getAddressBalance', async function(req, res, next) {
     });
 });
 
-router.post('/getAddressTokenBalance', async function(req, res, next) {
-  const userAddress = req.body.address;
+const BigNumber = require('bignumber.js');
+BigNumber.config({ EXPONENTIAL_AT: 1e9 }); // 지수표기 절대 금지 수준으로 올림
 
-    // TronWeb 인스턴스 생성
-    const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
+router.post('/getAddressTokenBalance', async function(req, res) {
+  const userAddress = (req.body.address || '').trim();
+  const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
 
-  if (!userAddress || userAddress.trim() === '' || !tronWeb.isAddress(userAddress)) {
-    // 주소가 없거나 빈 값이거나 잘못된 형식일 경우 에러 메시지 반환
+  if (!userAddress || !tronWeb.isAddress(userAddress)) {
     return res.status(400).send({ result: 'error', message: 'Invalid address provided' });
   }
 
   try {
-    // 계약 인스턴스 가져오기
     const contract = await tronWeb.contract().at(EVCtokenContractAddress);
     tronWeb.setAddress(userAddress);
 
-    // 사용자 주소의 잔액을 가져옵니다.
-    let balance = 0;
+    // 1) raw balance는 '정수 문자열'로 받기
+    let raw = '0';
     try {
-      balance = await contract.methods.balanceOf(userAddress).call();
-      console.log('Raw Balance (in Sun):', balance.toString());
-    } catch (error) {
-      console.error('잔액 조회 중 오류 발생:', error.response?.data || error.message);
-      throw error; // 에러 다시 던지기
+      const v = await contract.methods.balanceOf(userAddress).call();
+      raw = typeof v === 'string' ? v : v.toString(); // 절대 Number로 변환 X
+      console.log('Raw Balance (integer):', raw);
+    } catch (e) {
+      console.error('잔액 조회 중 오류:', e.response?.data || e.message);
+      throw e;
     }
 
-    // 소수점 단위를 적용하여 변환 (예: 소수점 자릿수 18)
-    const decimals = 6; // 토큰의 소수점 자릿수
-    const decimalBalance = new BigNumber(balance.toString()).dividedBy(new BigNumber(10).pow(decimals)).toString();
+    // 2) decimals도 컨트랙트에서 읽기 (하드코딩 금지)
+    let decimals = 6;
+    try {
+      const d = await contract.methods.decimals().call();
+      decimals = Number(d); // 여기서만 Number 허용 (작은 정수)
+    } catch (e) {
+      console.warn('decimals 조회 실패, 기본 6 사용:', e.message);
+    }
 
-    console.log('LOTT Balance:', decimalBalance);
+    // 3) 사람이 읽는 값으로 변환 (문자열, 지수표기 금지)
+    const human = new BigNumber(raw).div(new BigNumber(10).pow(decimals));
+    // DB 저장용: 고정 소수 자릿수(예: 6자리)로 문자열 생성
+    const humanFixed = human.toFixed(decimals); // 예: "5000000000.000000"
 
-    // 성공 응답 반환
-    res.status(200).send({ result: 'success', balance: decimalBalance });
+    console.log('Human Balance:', humanFixed);
+
+    // === 여기서 DB 저장 시에도 문자열 그대로 저장하세요 ===
+    // await saveBalanceToDB(userId, humanFixed); // 예시
+
+    return res.status(200).send({ result: 'success', balance: humanFixed, decimals });
   } catch (error) {
-    console.error('잔액 조회 중 오류 발생:', error);
-    res.status(500).send({ result: 'error', message: 'Failed to fetch token balance', error: error.message });
+    console.error('잔액 조회 중 오류:', error);
+    return res.status(500).send({ result: 'error', message: 'Failed to fetch token balance', error: error.message });
   }
 });
+
+
+// router.post('/getAddressTokenBalance', async function(req, res, next) {
+//   const userAddress = req.body.address;
+
+//     // TronWeb 인스턴스 생성
+//     const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
+
+//   if (!userAddress || userAddress.trim() === '' || !tronWeb.isAddress(userAddress)) {
+//     // 주소가 없거나 빈 값이거나 잘못된 형식일 경우 에러 메시지 반환
+//     return res.status(400).send({ result: 'error', message: 'Invalid address provided' });
+//   }
+
+//   try {
+//     // 계약 인스턴스 가져오기
+//     const contract = await tronWeb.contract().at(EVCtokenContractAddress);
+//     tronWeb.setAddress(userAddress);
+
+//     // 사용자 주소의 잔액을 가져옵니다.
+//     let balance = 0;
+//     try {
+//       balance = await contract.methods.balanceOf(userAddress).call();
+//       console.log('Raw Balance (in Sun):', balance.toString());
+//     } catch (error) {
+//       console.error('잔액 조회 중 오류 발생:', error.response?.data || error.message);
+//       throw error; // 에러 다시 던지기
+//     }
+
+//     // 소수점 단위를 적용하여 변환 (예: 소수점 자릿수 18)
+//     const decimals = 6; // 토큰의 소수점 자릿수
+//     const decimalBalance = new BigNumber(balance.toString()).dividedBy(new BigNumber(10).pow(decimals)).toString();
+
+//     console.log('LOTT Balance:', decimalBalance);
+
+//     // 성공 응답 반환
+//     res.status(200).send({ result: 'success', balance: decimalBalance });
+//   } catch (error) {
+//     console.error('잔액 조회 중 오류 발생:', error);
+//     res.status(500).send({ result: 'error', message: 'Failed to fetch token balance', error: error.message });
+//   }
+// });
 
 
 
