@@ -10,6 +10,7 @@ const { throws } = require('assert');
 const BigNumber = require('bignumber.js');
 const axios = require('axios');
 require('dotenv').config();
+const { formatUnits } = require('./utils/formatUnits');
 
 //트론
 const TronWeb = require('tronweb');
@@ -204,10 +205,9 @@ router.post('/getAddressBalance', async function(req, res, next) {
     });
 });
 
-const BigNumber = require('bignumber.js');
-BigNumber.config({ EXPONENTIAL_AT: 1e9 }); // 지수표기 절대 금지 수준으로 올림
 
-router.post('/getAddressTokenBalance', async function(req, res) {
+
+router.post('/getAddressTokenBalance', async (req, res) => {
   const userAddress = (req.body.address || '').trim();
   const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
 
@@ -219,42 +219,32 @@ router.post('/getAddressTokenBalance', async function(req, res) {
     const contract = await tronWeb.contract().at(EVCtokenContractAddress);
     tronWeb.setAddress(userAddress);
 
-    // 1) raw balance는 '정수 문자열'로 받기
-    let raw = '0';
-    try {
-      const v = await contract.methods.balanceOf(userAddress).call();
-      raw = typeof v === 'string' ? v : v.toString(); // 절대 Number로 변환 X
-      console.log('Raw Balance (integer):', raw);
-    } catch (e) {
-      console.error('잔액 조회 중 오류:', e.response?.data || e.message);
-      throw e;
-    }
+    // 1) raw balance는 "정수 문자열"로만 다루기
+    const v = await contract.methods.balanceOf(userAddress).call();
+    const raw = typeof v === 'string' ? v : v.toString(); // Number 금지
 
-    // 2) decimals도 컨트랙트에서 읽기 (하드코딩 금지)
+    // 2) decimals 조회(실패 시 기본 6)
     let decimals = 6;
     try {
       const d = await contract.methods.decimals().call();
-      decimals = Number(d); // 여기서만 Number 허용 (작은 정수)
-    } catch (e) {
-      console.warn('decimals 조회 실패, 기본 6 사용:', e.message);
-    }
+      decimals = Number(d);
+    } catch (_) {}
 
-    // 3) 사람이 읽는 값으로 변환 (문자열, 지수표기 금지)
-    const human = new BigNumber(raw).div(new BigNumber(10).pow(decimals));
-    // DB 저장용: 고정 소수 자릿수(예: 6자리)로 문자열 생성
-    const humanFixed = human.toFixed(decimals); // 예: "5000000000.000000"
+    // 3) DB용 고정 자릿수 문자열로 변환
+    const humanFixed = formatUnits(raw, decimals, { fixed: true });   // 예: "5000000000.000000"
+    // 표시용(불필요한 0 제거) 필요하면:
+    // const human = formatUnits(raw, decimals, { fixed: false });
 
-    console.log('Human Balance:', humanFixed);
-
-    // === 여기서 DB 저장 시에도 문자열 그대로 저장하세요 ===
-    // await saveBalanceToDB(userId, humanFixed); // 예시
+    // TODO: DB 저장 시에도 문자열 그대로 저장
+    // await saveBalance(userId, humanFixed);
 
     return res.status(200).send({ result: 'success', balance: humanFixed, decimals });
-  } catch (error) {
-    console.error('잔액 조회 중 오류:', error);
-    return res.status(500).send({ result: 'error', message: 'Failed to fetch token balance', error: error.message });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).send({ result: 'error', message: 'Failed to fetch token balance', error: err.message });
   }
 });
+
 
 
 // router.post('/getAddressTokenBalance', async function(req, res, next) {
