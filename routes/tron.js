@@ -701,7 +701,7 @@ router.post('/removePendingTransaction', function (req, res) {
 // 수동 송금 내역 확인 및 일괄 업데이트
 router.get('/checkTransactionStatus', async function (req, res) {
   try {
-    var coinList = ["TRON","LOTT"];
+    var coinList = ["TRON","LOTT","WIN"];
     // var coinList = ["tron"];
     const delay = 300; // 요청 간 200ms 지연 (초당 약 5개 요청)
 
@@ -1185,7 +1185,7 @@ async function expectEnergy(user_id, address, to_address, amount, coin_name) {
        bandwidthDeficit,
        trxCost,
      };
-    } else if (coin_name === 'LOTT') {
+    } else if (coin_name === 'LOTT' || coin_name ===  "WIN") {
       // TRC-20 토큰 전송 에너지 계산
       console.log("Estimating energy for TRC-20 transfer...");
 
