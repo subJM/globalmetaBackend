@@ -92,11 +92,11 @@ router.post('/create_account', async function (req, res, next) {
     }
 
     // 성공 응답
-    res.status(201).send('success');
+    res.status(201).send({result : 'success'});
     // res.status(201).send({result:"success", privateKey: account_result.privateKey});
   } catch (error) {
     console.error('error:', error);
-    res.status(500).send('서버 오류 발생');
+    res.status(500).send({result: 'error', message: '서버 오류 발생'});
   }
 });
 
