@@ -25,7 +25,6 @@ const TronWeb = require('tronweb');
 const fullNode = 'https://api.trongrid.io'; // 메인넷 노드
 const solidityNode = 'https://api.trongrid.io'; // 메인넷 솔리디티 노드
 const eventServer = 'https://api.trongrid.io'; // 메인넷 이벤트 서버
-const tronapikey = '882abac6-31cd-4bb4-8587-ae84d84f8a5b'; // 메인넷 이벤트 서버
 
 // TronWeb 인스턴스 생성
 // const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
@@ -37,7 +36,21 @@ const tronapikey = '882abac6-31cd-4bb4-8587-ae84d84f8a5b'; // 메인넷 이벤�
 
 // LOTT 토큰 주소
 const EVCtokenContractAddress = "TVfuBgFnMHMPRadR9d9pStvTvttBmBrf51";
+const LOTT_DECIMALS = 18;
 const DATA_ROOT = process.env.USER_DATA_DIR || path.resolve(__dirname, '..', 'user');
+
+const createTronWeb = () => {
+  const apiKey = process.env.TRON_PRO_API_KEY;
+
+  if (apiKey) {
+    return new TronWeb({
+      fullHost: fullNode,
+      headers: { 'TRON-PRO-API-KEY': apiKey },
+    });
+  }
+
+  return new TronWeb(fullNode, solidityNode, eventServer);
+};
 
 /* GET home page. */
 // const privateKey = await fs.readFileSync(`./user/${user_id}/privateKey`, 'utf8');
@@ -185,8 +198,7 @@ router.post('/getAddress', async (req, res) => {
 
 router.post('/getAddressBalance', async function(req, res, next) {
   var address = req.body.address;
-  // TronWeb 인스턴스 생성
-  const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
+  const tronWeb = createTronWeb();
 
   if (!address || address.trim() === '' || !tronWeb.isAddress(address)) {
     // 주소가 없거나 빈 값이거나 잘못된 형식일 경우 에러 메시지 반환
@@ -208,15 +220,15 @@ BigNumber.config({ EXPONENTIAL_AT: 1e9 }); // 지수표기 절대 금지 수준�
 
 router.post('/getAddressTokenBalance', async function(req, res) {
   const userAddress = (req.body.address || '').trim();
-  const tronWeb = new TronWeb(fullNode, solidityNode, eventServer);
+  const tronWeb = createTronWeb();
 
   if (!userAddress || !tronWeb.isAddress(userAddress)) {
     return res.status(400).send({ result: 'error', message: 'Invalid address provided' });
   }
 
   try {
-    const contract = await tronWeb.contract().at(EVCtokenContractAddress);
     tronWeb.setAddress(userAddress);
+    const contract = await tronWeb.contract().at(EVCtokenContractAddress);
 
     // 1) raw balance는 '정수 문자열'로 받기
     let raw = '0';
@@ -229,19 +241,8 @@ router.post('/getAddressTokenBalance', async function(req, res) {
       throw e;
     }
 
-    // 2) decimals도 컨트랙트에서 읽기 (하드코딩 금지)
-    let decimals = 6;
-    try {
-      const d = await contract.methods.decimals().call();
-      decimals = Number(d); // 여기서만 Number 허용 (작은 정수)
-    } catch (e) {
-      console.warn('decimals 조회 실패, 기본 6 사용:', e.message);
-    }
-
-    // 3) 사람이 읽는 값으로 변환 (문자열, 지수표기 금지)
-    const human = new BigNumber(raw).div(new BigNumber(10).pow(decimals));
-    // DB 저장용: 고정 소수 자릿수(예: 6자리)로 문자열 생성
-    const humanFixed = human.toFixed(decimals); // 예: "5000000000.000000"
+    const human = new BigNumber(raw).div(new BigNumber(10).pow(LOTT_DECIMALS));
+    const humanFixed = human.toFixed(LOTT_DECIMALS);
 
     console.log('Human Balance:', humanFixed);
 
@@ -251,8 +252,7 @@ router.post('/getAddressTokenBalance', async function(req, res) {
     return res.status(200).send({
       result: 'success',
       balance: humanFixed,
-      rawBalance: raw,
-      decimals,
+      decimals: LOTT_DECIMALS,
     });
   } catch (error) {
     console.error('잔액 조회 중 오류:', error);
