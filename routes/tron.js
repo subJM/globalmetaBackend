@@ -248,7 +248,12 @@ router.post('/getAddressTokenBalance', async function(req, res) {
     // === 여기서 DB 저장 시에도 문자열 그대로 저장하세요 ===
     // await saveBalanceToDB(userId, humanFixed); // 예시
 
-    return res.status(200).send({ result: 'success', balance: humanFixed, decimals });
+    return res.status(200).send({
+      result: 'success',
+      balance: humanFixed,
+      rawBalance: raw,
+      decimals,
+    });
   } catch (error) {
     console.error('잔액 조회 중 오류:', error);
     return res.status(500).send({ result: 'error', message: 'Failed to fetch token balance', error: error.message });
