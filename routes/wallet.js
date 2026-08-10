@@ -23,27 +23,33 @@ router.post('/getAddressBalance', async (req,res) => {
 
 });
 router.post('/getUserWallet', async (req,res) => {
-    const data = req.body;
     const user_srl = req.body.user_srl;
 
     await getWalletBalance(user_srl , (error, results)=>{
 
         if(error){
-            res.status(500).send({ result: 'error' , error : error });
+            return res.status(500).send({ result: 'error', message: error.message });
         }
-        res.status(200).send({ result: 'success' , data: results});
+        return res.status(200).send({ result: 'success' , data: results});
     });
 
 });
 
-router.post("/updateWallet", async (req, res)=>{
+router.post("/updateWallet", (req, res)=>{
     const user_srl = req.body.user_srl;
     const token_name = req.body.token_name;
     const balance = req.body.balance;
     console.log('업데이트' ,req.body);
-    updateWallet(user_srl , token_name , balance, (result)=>{
-        console.log("updateWallet : ",result);
-        res.status(200).send({result: "success" , result: result});
+    updateWallet(user_srl, token_name, balance, (error, results)=>{
+        if (error) {
+            console.error("updateWallet failed:", error);
+            return res.status(500).send({
+                result: "error",
+                message: error.message,
+            });
+        }
+
+        return res.status(200).send({ result: "success", data: results });
     });
 
 });
